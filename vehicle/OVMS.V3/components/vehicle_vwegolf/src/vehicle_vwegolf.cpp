@@ -47,6 +47,11 @@ OvmsVehicleVWeGolf::OvmsVehicleVWeGolf() {
     RegisterCanBus(2, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);  // FCAN -> Powertrain CAN
     RegisterCanBus(3, CAN_MODE_ACTIVE, CAN_SPEED_500KBPS);  // KCAN -> convenience CAN
 
+    // 0x66E (InnenTemp) broadcasts 0xFE as a sentinel before valid data is available,
+    // which decodes to 77°C and persists across reboots. Clear it so it shows as
+    // undefined rather than a wrong value.
+    StandardMetrics.ms_v_env_cabintemp->Clear();
+
     OvmsCommand* cmd_vweg = MyCommandApp.RegisterCommand("xvg", "VW-eGolf framework");
     cmd_vweg->RegisterCommand("offline", "OVMS please go offline", [this](...) {
         m_is_control_active = false;
@@ -703,8 +708,9 @@ void OvmsVehicleVWeGolf::IncomingFrameCan3(CAN_frame_t* p_frame) {
             tmp_u8 = ((uint8_t)(d[4] & 0xff) << 0) |
                      0;  // outerTemp Faktor 0.5 Offset -50, Minimum -50, Maximum 75 [°C] Initial 77
             tmp_u8 = (uint8_t)tmp_u8;
+            if (tmp_u8 == 0xFE) break;  // ECU sentinel "no data yet" → 77°C, ignore
             tmp_f32 = ((float)tmp_u8) * 0.5F - 50.0F;
-            StandardMetrics.ms_v_env_cabintemp->SetValue(tmp_f32);  // only initial temp shown
+            StandardMetrics.ms_v_env_cabintemp->SetValue(tmp_f32);
 
             static uint8_t cnt3 = 0;
             cnt3++;
