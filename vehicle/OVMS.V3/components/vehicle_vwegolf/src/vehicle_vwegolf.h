@@ -56,6 +56,7 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
     vehicle_command_t CommandLock(const char* pin) override;
     vehicle_command_t CommandUnlock(const char* pin) override;
     vehicle_command_t CommandWakeup() override;
+    vehicle_command_t CommandClimateControl(bool enable) override;
     void SendOcuHeartbeat();
 
  protected:
@@ -76,6 +77,7 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
     bool m_is_control_active = false;
     uint8_t m_vin_parts_received = 0;
     char m_vin_buf[18] = {};
+    uint8_t m_bap_counter = 0;
 };
 
 #endif  // #ifndef __VEHICLE_VWEG_H__
