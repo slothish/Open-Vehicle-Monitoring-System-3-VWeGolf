@@ -91,9 +91,9 @@ static int replay_crtd(OvmsVehicleVWeGolf* v, const char* path) {
         frame.FIR.B.DLC = dlc;
 
         if (bus == 2) {
-            // J533 gateway bridges KCAN onto FCAN (can2), so both handlers see it.
+            // J533 bridges KCAN onto CAN2; IncomingFrameCan2 handles the FCAN-specific
+            // IDs (0x187, 0x6B4) then forwards everything to IncomingFrameCan3.
             v->IncomingFrameCan2(&frame);
-            v->IncomingFrameCan3(&frame);
         } else if (bus == 3) {
             v->IncomingFrameCan3(&frame);
         } else {
@@ -116,22 +116,34 @@ void test_crtd_replay() {
     g_metrics = MetricStore{};
     auto* v = new OvmsVehicleVWeGolf();
 
-    int n = replay_crtd(v, "candumps/kcan-capture.crtd");
+    // Prefer the real capture (not committed, developer only); fall back to the
+    // committed synthetic fixture so the test runs in CI without real car data.
+    const char* candidates[] = {
+        "candumps/kcan-capture.crtd",
+        "candumps/kcan-synthetic.crtd",
+    };
+    const char* used_path = nullptr;
+    int n = -1;
+    for (const char* p : candidates) {
+        n = replay_crtd(v, p);
+        if (n >= 0) { used_path = p; break; }
+    }
 
     if (n < 0) {
-        printf("  SKIP: candumps/kcan-capture.crtd not found\n");
+        printf("  SKIP: no CRTD fixture found\n");
         delete v;
         return;
     }
-    printf("  replayed %d frames\n", n);
+    printf("  replayed %d frames from %s\n", n, used_path);
 
     // --- Speed: capture taken while car was parked, expect 0 km/h ---
     float speed = StandardMetrics.ms_v_pos_speed->AsFloat();
     CHECK(near_f(speed, 0.0f, 1.0f), "Speed ~0 km/h (car parked during capture)");
 
-    // --- SoC: byte3=0xFE → 127.0 (the ECU's initial/no-data sentinel) ---
+    // --- SoC: kcan-capture.crtd has d[3]=0x79 → 60.5%. The 0xFE sentinel is
+    //     filtered in the decoder, so the metric should hold the real value. ---
     float soc = StandardMetrics.ms_v_bat_soc->AsFloat();
-    CHECK(soc > 0.0f, "SoC metric was set (> 0)");
+    CHECK(near_f(soc, 60.5f, 1.0f), "SoC ~60.5% (d[3]=0x79 from kcan-capture)");
 
     // --- Gear: 0x187 byte2=0x12, nibble=2 → Park → gear=0 ---
     int gear = StandardMetrics.ms_v_env_gear->AsValue();

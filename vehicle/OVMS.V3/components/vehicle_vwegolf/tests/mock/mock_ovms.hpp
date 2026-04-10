@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -25,6 +26,8 @@
 typedef uint32_t TickType_t;
 inline void vTaskDelay(TickType_t) {}
 inline TickType_t pdMS_TO_TICKS(uint32_t ms) { return ms; }
+inline TickType_t xTaskGetTickCount() { return 0; }
+static constexpr uint32_t portTICK_PERIOD_MS = 1;
 
 // ---------------------------------------------------------------------------
 // CAN types
@@ -37,16 +40,45 @@ typedef union {
     struct { CAN_frame_format_t FF; uint8_t DLC; } B;
 } CAN_FIR_t;
 
+typedef int esp_err_t;
+static constexpr esp_err_t ESP_OK   =  0;
+static constexpr esp_err_t ESP_FAIL = -1;
+
+typedef enum { CAN_errorstate_none, CAN_errorstate_busoff } CAN_errorstate_t;
+
+struct TxRecord {
+    bool extended;
+    uint32_t id;
+    uint8_t len;
+    uint8_t data[8];
+};
+
 struct canbus {
     uint8_t m_busnumber = 0;
-    void WriteStandard(uint32_t /*id*/, uint8_t /*len*/, uint8_t* /*data*/) {}
-    void WriteExtended(uint32_t /*id*/, uint8_t /*len*/, uint8_t* /*data*/) {}
+    std::vector<TxRecord> tx_log;
+    CAN_errorstate_t error_state = CAN_errorstate_none;
+    esp_err_t next_write_result = ESP_OK;
+
+    esp_err_t WriteStandard(uint32_t id, uint8_t len, uint8_t* data, int /*wait*/ = 0) {
+        if (next_write_result != ESP_OK) return next_write_result;
+        TxRecord r{false, id, len, {}};
+        memcpy(r.data, data, len);
+        tx_log.push_back(r);
+        return ESP_OK;
+    }
+    esp_err_t WriteExtended(uint32_t id, uint8_t len, uint8_t* data, int /*wait*/ = 0) {
+        if (next_write_result != ESP_OK) return next_write_result;
+        TxRecord r{true, id, len, {}};
+        memcpy(r.data, data, len);
+        tx_log.push_back(r);
+        return ESP_OK;
+    }
+    void Reset() { tx_log.clear(); }
+    CAN_errorstate_t GetErrorState() { return error_state; }
 };
 
 // 'Minutes' is used as a unit tag in some metric SetValue calls
 static constexpr int Minutes = 0;
-
-typedef int esp_err_t;
 
 struct CAN_frame_t {
     canbus*    origin   = nullptr;
@@ -154,6 +186,9 @@ struct StandardMetricsType {
     OvmsMetricString* ms_v_charge_type          = new OvmsMetricString("ms_v_charge_type");
     OvmsMetricBool*   ms_v_charge_timermode     = new OvmsMetricBool("ms_v_charge_timermode");
     OvmsMetricInt*    ms_v_charge_duration_full = new OvmsMetricInt("ms_v_charge_duration_full");
+    OvmsMetricFloat*  ms_v_charge_voltage       = new OvmsMetricFloat("ms_v_charge_voltage");
+    OvmsMetricFloat*  ms_v_charge_current       = new OvmsMetricFloat("ms_v_charge_current");
+    OvmsMetricFloat*  ms_v_charge_power         = new OvmsMetricFloat("ms_v_charge_power");
     // Identity
     OvmsMetricString* ms_v_vin                  = new OvmsMetricString("ms_v_vin");
     // Monotonic time
@@ -211,7 +246,15 @@ struct OvmsVehicle {
     canbus* m_can2 = nullptr;
     canbus* m_can3 = nullptr;
 
-    void RegisterCanBus(int /*bus*/, CAN_mode_t, CAN_speed_t) {}
+    // Allocate stub canbus objects so vehicle code can call m_canN->Write*().
+    canbus m_can_stubs[4];
+    void RegisterCanBus(int bus, CAN_mode_t, CAN_speed_t) {
+        canbus* b = &m_can_stubs[bus];
+        b->m_busnumber = bus;
+        if (bus == 1) m_can1 = b;
+        else if (bus == 2) m_can2 = b;
+        else if (bus == 3) m_can3 = b;
+    }
 
     virtual void IncomingFrameCan1(CAN_frame_t*) {}
     virtual void IncomingFrameCan2(CAN_frame_t*) {}
@@ -219,9 +262,12 @@ struct OvmsVehicle {
     virtual void Ticker1(uint32_t) {}
     virtual void Ticker10(uint32_t) {}
     bool PinCheck(const char* /*pin*/) { return true; }  // always pass in tests
+    void NotifyChargeStart() {}
+    void NotifyChargeStopped() {}
 
     virtual vehicle_command_t CommandLock(const char*)   { return NotImplemented; }
     virtual vehicle_command_t CommandUnlock(const char*) { return NotImplemented; }
-    virtual vehicle_command_t CommandWakeup()            { return NotImplemented; }
+    virtual vehicle_command_t CommandWakeup()                 { return NotImplemented; }
+    virtual vehicle_command_t CommandClimateControl(bool)     { return NotImplemented; }
     virtual ~OvmsVehicle() = default;
 };
