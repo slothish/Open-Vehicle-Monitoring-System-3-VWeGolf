@@ -129,6 +129,13 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
  private:
     void UpdatePollState();
 
+    // ---------------------------------------------------------------------------
+    // Ticker1 sub-tasks — implementation: vwegolf_tx.cpp
+    // ---------------------------------------------------------------------------
+    void OcuTick(bool bus_alive, bool just_went_idle);
+    void ClimaTick(bool bus_alive);
+    void CampingTick();
+
     // Seconds since the last KCAN (can3) frame arrived. Reset to 0 in IncomingFrameCan3,
     // incremented each second in Ticker1. Bus is alive while < VWEGOLF_BUS_TIMEOUT_SECS.
     // Initialized to timeout so we treat the bus as offline at cold boot.
