@@ -766,6 +766,41 @@ void test_camping_maxhours_counts() {
 }
 
 // ---------------------------------------------------------------------------
+// SendOcuHeartbeat: co-pending request flags must OR-accumulate into data[6]
+// ---------------------------------------------------------------------------
+
+void test_heartbeat_or_accumulates_copending_flags() {
+    printf("\ntest_heartbeat_or_accumulates_copending_flags\n");
+    g_metrics = MetricStore{};
+    g_tick_count = 0;
+    auto* v = new OvmsVehicleVWeGolf();
+
+    // Clear the 180 ms self-throttle so the heartbeat actually sends.
+    advance_ms(1000);
+
+    // Two independently-latched request flags pending in the same send window.
+    v->CommandIndicators();  // bit 0x8
+    v->CommandLock(nullptr); // bit 0x2
+
+    kcan(v)->tx_log.clear();
+    v->SendOcuHeartbeat();
+
+    bool found = false;
+    uint8_t data6 = 0;
+    for (auto& r : kcan(v)->tx_log) {
+        if (!r.extended && r.id == 0x5A7) {
+            found = true;
+            data6 = r.data[6];
+        }
+    }
+    CHECK(found, "0x5A7 heartbeat sent");
+    CHECK((data6 & 0x2) != 0, "Lock bit present in data[6]");
+    CHECK((data6 & 0x8) != 0, "Indicators bit present in data[6]");
+
+    delete v;
+}
+
+// ---------------------------------------------------------------------------
 // Entry point (called from test_can_decode.cpp main)
 // ---------------------------------------------------------------------------
 
@@ -796,4 +831,5 @@ void test_clima_all() {
     test_camping_off_halts_thermostat();
     test_camping_drive_exit();
     test_camping_maxhours_counts();
+    test_heartbeat_or_accumulates_copending_flags();
 }

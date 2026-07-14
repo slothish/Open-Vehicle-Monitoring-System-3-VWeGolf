@@ -276,7 +276,7 @@ void OvmsVehicleVWeGolf::SendOcuHeartbeat() {
     // Horn
     if (m_horn_requested) {
         tmp_u8 = 1;
-        data[6] = (((uint8_t)tmp_u8) >> 0) & 0x1;
+        data[6] |= (((uint8_t)tmp_u8) >> 0) & 0x1;
         m_horn_requested = false;
         ESP_LOGI(TAG, "Horn");
     }
@@ -285,7 +285,7 @@ void OvmsVehicleVWeGolf::SendOcuHeartbeat() {
     // signal so not working OOB
     if (m_lock_requested >= 1) {
         tmp_u8 = 1;
-        data[6] = (((uint8_t)tmp_u8) << 1) & 0x2;
+        data[6] |= (((uint8_t)tmp_u8) << 1) & 0x2;
         m_lock_requested = false;
         ESP_LOGI(TAG, "DoorLock");
     }
@@ -294,7 +294,7 @@ void OvmsVehicleVWeGolf::SendOcuHeartbeat() {
     // signal so not working OOB
     if (m_unlock_requested) {
         tmp_u8 = 1;
-        data[6] = (((uint8_t)tmp_u8) << 2) & 0x4;
+        data[6] |= (((uint8_t)tmp_u8) << 2) & 0x4;
         m_unlock_requested = false;
         ESP_LOGI(TAG, "DoorUnlock");
     }
@@ -302,7 +302,7 @@ void OvmsVehicleVWeGolf::SendOcuHeartbeat() {
     // Hazard lights
     if (m_indicators_requested) {
         tmp_u8 = 1;
-        data[6] = (((uint8_t)tmp_u8) << 3) & 0x8;
+        data[6] |= (((uint8_t)tmp_u8) << 3) & 0x8;
         m_indicators_requested = false;
         ESP_LOGI(TAG, "Hazard lights");
     }
@@ -310,7 +310,7 @@ void OvmsVehicleVWeGolf::SendOcuHeartbeat() {
     // Panic alarm
     if (m_panic_requested) {
         tmp_u8 = 1;
-        data[6] = (((uint8_t)tmp_u8) << 4) & 0x10;
+        data[6] |= (((uint8_t)tmp_u8) << 4) & 0x10;
         m_panic_requested = false;
         ESP_LOGI(TAG, "PanicAlarm!");
     }
