@@ -26,6 +26,8 @@
 #ifndef __VEHICLE_VWEG_H__
 #define __VEHICLE_VWEG_H__
 
+#include <atomic>
+
 #include "can.h"
 #include "ovms_command.h"
 #include "ovms_config.h"
@@ -180,19 +182,32 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
     uint8_t m_clima_run_secs = 255;
     uint8_t m_hvac_stop_secs = 255;
 
-    // Set while a multi-frame BAP command burst is in flight (CommandClimateControl).
-    // SendOcuHeartbeat skips if set — a 0x5A7 queued between BAP frames blocks the
-    // continuation and the ECU discards the message. The 180 ms throttle isn't enough
-    // when the 3×WriteExtended calls can take up to 600 ms worst-case.
-    bool m_bap_burst_active = false;
+    // Set while a multi-frame BAP command burst is in flight (CommandClimateControl /
+    // SendClimaBapBurst, command-dispatch task). SendOcuHeartbeat/SendNmAlive read it as
+    // a guard — a 0x5A7/NM frame queued between BAP frames blocks the continuation and
+    // the ECU discards the message — and are themselves called both from Ticker1 and from
+    // IncomingFrameCan3 on the CAN RX task. Plain bool is not safe here: the writer
+    // (command task) and readers (RX task, Ticker1) run concurrently with no lock, so a
+    // non-atomic bool read/write pair is undefined behavior and the compiler/CPU are free
+    // to reorder or tear it. std::atomic<bool> with the default (seq_cst) operators fixes
+    // both: single-writer/multi-reader needs no compound RMW, and seq_cst gives a global
+    // order so a reader can never observe a stale "not active" while the burst is mid-send.
+    // Not on a hot path (throttled to ~5 Hz at most), so the extra ordering cost is moot.
+    std::atomic<bool> m_bap_burst_active{false};
 
     // Deferred clima burst. When CommandClimateControl has to wake the bus, it kicks
     // WakeKcanBus, records the tick, and returns Success immediately so the command
     // dispatch task isn't blocked for the 1 s NM-join settle. Ticker1 fires the 3-frame
     // BAP burst once VWEGOLF_CLIMA_SETTLE_MS has elapsed.
-    bool m_clima_pending = false;
-    bool m_clima_pending_enable = false;
-    uint32_t m_clima_pending_tick = 0;
+    // Multi-word handoff written from the command-dispatch task (CommandClimateControl)
+    // and read/cleared from Ticker1 — CommandClimateControl also re-reads/re-writes
+    // m_clima_pending_enable to retarget a still-pending burst, so this isn't a simple
+    // single-writer case. Each field is std::atomic (seq_cst) rather than hand-tuned
+    // acquire/release: this handoff fires at most once per command, not a hot path, and
+    // seq_cst removes any need to reason about cross-field ordering between the three.
+    std::atomic<bool> m_clima_pending{false};
+    std::atomic<bool> m_clima_pending_enable{false};
+    std::atomic<uint32_t> m_clima_pending_tick{0};
 
     // Camping mode: OVMS-side cabin-temperature thermostat (see xvg camping / StartCamping).
     // While active, Ticker1 trips CommandClimateControl start/stop to keep cabin temp inside
@@ -223,6 +238,7 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
  public:
     uint8_t test_bus_idle_ticks() const { return m_bus_idle_ticks; }
     bool test_camping_active() const { return m_camping_active; }
+    void test_set_bap_burst_active(bool v) { m_bap_burst_active = v; }
 #endif
 };
 

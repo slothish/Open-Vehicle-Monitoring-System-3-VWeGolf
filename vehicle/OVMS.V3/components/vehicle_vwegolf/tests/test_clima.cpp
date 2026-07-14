@@ -1,29 +1,30 @@
 // test_clima.cpp — Tests for climate control, wakeup, heartbeat, and bus idle logic.
 
-#include "mock/mock_ovms.hpp"
-#include "../src/vehicle_vwegolf.h"
-
 #include <cassert>
 #include <cstdio>
+
+#include "../src/vehicle_vwegolf.h"
+#include "mock/mock_ovms.hpp"
 
 extern int tests_run;
 extern int tests_passed;
 
-#define CHECK(cond, msg) do { \
-    tests_run++; \
-    if (cond) { tests_passed++; printf("  PASS: %s\n", msg); } \
-    else       { printf("  FAIL: %s\n", msg); } \
-} while(0)
+#define CHECK(cond, msg)                 \
+    do {                                 \
+        tests_run++;                     \
+        if (cond) {                      \
+            tests_passed++;              \
+            printf("  PASS: %s\n", msg); \
+        } else {                         \
+            printf("  FAIL: %s\n", msg); \
+        }                                \
+    } while (0)
 
 // Helper: get the KCAN (can3) stub from a vehicle instance.
-static canbus* kcan(OvmsVehicleVWeGolf* v) {
-    return v->m_can3;
-}
+static canbus* kcan(OvmsVehicleVWeGolf* v) { return v->m_can3; }
 
 // Advance the mock tick counter by ms milliseconds (portTICK_PERIOD_MS=1 in mock).
-static void advance_ms(uint32_t ms) {
-    g_tick_count += ms;
-}
+static void advance_ms(uint32_t ms) { g_tick_count += ms; }
 
 // Ticker1/Ticker10 are protected in OvmsVehicleVWeGolf. Call via base-class pointer
 // (public virtual in the mock OvmsVehicle) to dispatch correctly.
@@ -61,8 +62,7 @@ void test_wakeup_sends_nm_alive() {
 
     if (log.size() >= 2) {
         // Frame 1: 0x17330301 dominant-bit wake frame
-        CHECK(log[0].extended && log[0].id == 0x17330301,
-              "Frame 1 is extended 0x17330301 (wake)");
+        CHECK(log[0].extended && log[0].id == 0x17330301, "Frame 1 is extended 0x17330301 (wake)");
 
         // Frame 2: 0x1B000067 NM alive for OVMS node 0x67
         CHECK(log[1].extended && log[1].id == 0x1B000067,
@@ -111,12 +111,14 @@ void test_clima_start_bap_frames() {
     // Should have at least 3 extended frames (the BAP sequence).
     // May also have heartbeat frames from IncomingFrameCan3, so check the extended ones.
     size_t ext_count = 0;
-    for (auto& r : log) if (r.extended) ext_count++;
+    for (auto& r : log)
+        if (r.extended) ext_count++;
     CHECK(ext_count == 3, "3 extended BAP frames sent");
 
     // Find the 3 extended frames.
     std::vector<TxRecord> bap;
-    for (auto& r : log) if (r.extended) bap.push_back(r);
+    for (auto& r : log)
+        if (r.extended) bap.push_back(r);
 
     if (bap.size() >= 3) {
         // Frame 1: multi-frame start to port 0x19
@@ -160,7 +162,8 @@ void test_clima_stop_bap_trigger() {
 
     // Find the trigger frame (frame 3)
     std::vector<TxRecord> bap;
-    for (auto& r : kcan(v)->tx_log) if (r.extended) bap.push_back(r);
+    for (auto& r : kcan(v)->tx_log)
+        if (r.extended) bap.push_back(r);
 
     CHECK(bap.size() >= 3, "3 BAP frames sent for stop");
     if (bap.size() >= 3) {
@@ -267,14 +270,16 @@ void test_clima_counter_increments() {
     kcan(v)->tx_log.clear();
     v->CommandClimateControl(true);
     std::vector<TxRecord> bap1;
-    for (auto& r : kcan(v)->tx_log) if (r.extended) bap1.push_back(r);
+    for (auto& r : kcan(v)->tx_log)
+        if (r.extended) bap1.push_back(r);
     uint8_t ctr1 = bap1.size() > 0 ? bap1[0].data[4] : 0;
 
     // Second call: counter should be 0x02
     kcan(v)->tx_log.clear();
     v->CommandClimateControl(false);
     std::vector<TxRecord> bap2;
-    for (auto& r : kcan(v)->tx_log) if (r.extended) bap2.push_back(r);
+    for (auto& r : kcan(v)->tx_log)
+        if (r.extended) bap2.push_back(r);
     uint8_t ctr2 = bap2.size() > 0 ? bap2[0].data[4] : 0;
 
     CHECK(ctr1 == 0x01, "First call counter = 0x01");
@@ -338,7 +343,8 @@ void test_ticker1_bus_idle_timeout() {
     // Make bus active and start OCU
     auto f = make_kcan_frame(v, 0x131, {0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00});
     v->IncomingFrameCan3(&f);
-    v->CommandWakeup();  // wakeup is a no-op since bus is active, but sets m_ocu_active... actually no
+    v->CommandWakeup();  // wakeup is a no-op since bus is active, but sets m_ocu_active... actually
+                         // no
     // After receiving a frame, bus is active. We need to explicitly start ocu.
     // Use CommandClimateControl which sets m_ocu_active = true.
     v->CommandClimateControl(true);
@@ -466,7 +472,8 @@ void test_hvac_hold_bridges_thermostat_cycle() {
 
     // No further evidence — clears once the hold elapses (autonomous/timer stop).
     for (int i = 0; i < 3; i++) call_ticker1(v, 300 + i);
-    CHECK(!StandardMetrics.ms_v_env_hvac->AsBool(), "hvac clears after hold window with no evidence");
+    CHECK(!StandardMetrics.ms_v_env_hvac->AsBool(),
+          "hvac clears after hold window with no evidence");
 
     delete v;
 }
@@ -494,7 +501,8 @@ void test_hvac_stop_command_responsive() {
     // Past the suppress window, persistent running means the stop didn't take → trust it.
     for (int i = 0; i < VWEGOLF_HVAC_STOP_SUPPRESS_SECS + 1; i++) call_ticker1(v, i);
     v->IncomingFrameCan3(&running);
-    CHECK(StandardMetrics.ms_v_env_hvac->AsBool(), "ClimaRunning trusted again past suppress window");
+    CHECK(StandardMetrics.ms_v_env_hvac->AsBool(),
+          "ClimaRunning trusted again past suppress window");
 
     delete v;
 }
@@ -532,7 +540,7 @@ void test_camping_starts_clima_when_out_of_band() {
 
     StandardMetrics.ms_v_bat_soc->SetValue(80);        // above floor
     StandardMetrics.ms_v_env_cabintemp->SetValue(32);  // hot, above default tmax 26
-    poke_kcan(v);                                       // warm bus → synchronous burst
+    poke_kcan(v);                                      // warm bus → synchronous burst
     kcan(v)->tx_log.clear();
 
     v->StartCamping();
@@ -619,8 +627,8 @@ void test_camping_stale_cabin_no_start() {
     auto* v = new OvmsVehicleVWeGolf();
 
     StandardMetrics.ms_v_bat_soc->SetValue(80);
-    StandardMetrics.ms_v_env_cabintemp->SetValue(32);          // hot value...
-    g_metrics.stale["ms_v_env_cabintemp"] = true;             // ...but sensor is pinned/stale
+    StandardMetrics.ms_v_env_cabintemp->SetValue(32);  // hot value...
+    g_metrics.stale["ms_v_env_cabintemp"] = true;      // ...but sensor is pinned/stale
     poke_kcan(v);
     kcan(v)->tx_log.clear();
 
@@ -749,7 +757,7 @@ void test_camping_maxhours_counts() {
     auto* v = new OvmsVehicleVWeGolf();
 
     StandardMetrics.ms_v_bat_soc->SetValue(80);
-    StandardMetrics.ms_v_env_cabintemp->SetValue(20);       // in band → no thermostat action
+    StandardMetrics.ms_v_env_cabintemp->SetValue(20);        // in band → no thermostat action
     MyConfig.SetParamValue("xvg", "cc-camp-maxhours", "1");  // 1 h = 3600 s
     v->StartCamping();
 
@@ -779,8 +787,8 @@ void test_heartbeat_or_accumulates_copending_flags() {
     advance_ms(1000);
 
     // Two independently-latched request flags pending in the same send window.
-    v->CommandIndicators();  // bit 0x8
-    v->CommandLock(nullptr); // bit 0x2
+    v->CommandIndicators();   // bit 0x8
+    v->CommandLock(nullptr);  // bit 0x2
 
     kcan(v)->tx_log.clear();
     v->SendOcuHeartbeat();
@@ -796,6 +804,61 @@ void test_heartbeat_or_accumulates_copending_flags() {
     CHECK(found, "0x5A7 heartbeat sent");
     CHECK((data6 & 0x2) != 0, "Lock bit present in data[6]");
     CHECK((data6 & 0x8) != 0, "Indicators bit present in data[6]");
+
+    delete v;
+}
+
+// ---------------------------------------------------------------------------
+// m_bap_burst_active guard: observable invariant across task boundaries.
+//
+// True mid-burst injection (RX-task heartbeat firing between the 3 WriteExtended
+// calls inside SendClimaBapBurst) isn't reachable from this single-threaded harness
+// — SendClimaBapBurst runs to completion before control returns. Instead this pins
+// the observable contract the atomic guard exists to provide: while
+// m_bap_burst_active is set (as it would be for the whole burst duration on the real
+// task), neither SendOcuHeartbeat (called from IncomingFrameCan3 on the RX task) nor
+// SendNmAlive queues a frame, and normal (non-burst) heartbeat/NM sends are
+// unaffected once the flag clears.
+// ---------------------------------------------------------------------------
+
+void test_burst_guard_suppresses_heartbeat_and_nm() {
+    printf("\ntest_burst_guard_suppresses_heartbeat_and_nm\n");
+    g_metrics = MetricStore{};
+    g_tick_count = 0;
+    auto* v = new OvmsVehicleVWeGolf();
+
+    // Join the NM ring and clear the 180 ms self-throttle.
+    v->CommandWakeup();
+    advance_ms(1000);
+
+    // Simulate "burst in flight" as observed by another task.
+    v->test_set_bap_burst_active(true);
+
+    kcan(v)->tx_log.clear();
+    v->SendOcuHeartbeat();
+    v->SendNmAlive();
+    CHECK(kcan(v)->tx_log.empty(), "no 0x5A7/NM frame queued while burst guard set");
+
+    // Also drive the real RX-task call site: an incoming KCAN frame during the burst
+    // must not sneak a heartbeat out either.
+    auto f = make_kcan_frame(v, 0x131, {0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00});
+    v->IncomingFrameCan3(&f);
+    bool leaked = false;
+    for (auto& r : kcan(v)->tx_log) {
+        if (!r.extended && r.id == 0x5A7) leaked = true;
+    }
+    CHECK(!leaked, "no 0x5A7 leaked via IncomingFrameCan3 while burst guard set");
+
+    // Guard release restores normal behavior.
+    v->test_set_bap_burst_active(false);
+    advance_ms(1000);
+    kcan(v)->tx_log.clear();
+    v->SendOcuHeartbeat();
+    bool sent = false;
+    for (auto& r : kcan(v)->tx_log) {
+        if (!r.extended && r.id == 0x5A7) sent = true;
+    }
+    CHECK(sent, "heartbeat resumes once burst guard clears");
 
     delete v;
 }
@@ -832,4 +895,5 @@ void test_clima_all() {
     test_camping_drive_exit();
     test_camping_maxhours_counts();
     test_heartbeat_or_accumulates_copending_flags();
+    test_burst_guard_suppresses_heartbeat_and_nm();
 }
