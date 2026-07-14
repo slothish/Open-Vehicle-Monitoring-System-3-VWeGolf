@@ -182,17 +182,21 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
     uint8_t m_clima_run_secs = 255;
     uint8_t m_hvac_stop_secs = 255;
 
-    // Set while a multi-frame BAP command burst is in flight (CommandClimateControl /
-    // SendClimaBapBurst, command-dispatch task). SendOcuHeartbeat/SendNmAlive read it as
-    // a guard — a 0x5A7/NM frame queued between BAP frames blocks the continuation and
-    // the ECU discards the message — and are themselves called both from Ticker1 and from
-    // IncomingFrameCan3 on the CAN RX task. Plain bool is not safe here: the writer
-    // (command task) and readers (RX task, Ticker1) run concurrently with no lock, so a
-    // non-atomic bool read/write pair is undefined behavior and the compiler/CPU are free
-    // to reorder or tear it. std::atomic<bool> with the default (seq_cst) operators fixes
-    // both: single-writer/multi-reader needs no compound RMW, and seq_cst gives a global
-    // order so a reader can never observe a stale "not active" while the burst is mid-send.
-    // Not on a hot path (throttled to ~5 Hz at most), so the extra ordering cost is moot.
+    // Set while a multi-frame BAP command burst is in flight (SendClimaBapBurst, which is
+    // called both from CommandClimateControl on the command-dispatch task and from
+    // ClimaTick on Ticker1 — NOT single-writer). SendOcuHeartbeat/SendNmAlive read it as a
+    // guard — a 0x5A7/NM frame queued between BAP frames blocks the continuation and the
+    // ECU discards the message — and are themselves called both from Ticker1 and from
+    // IncomingFrameCan3 on the CAN RX task. Plain bool is not safe here: writers and
+    // readers run concurrently across tasks with no lock, so a non-atomic bool read/write
+    // is undefined behavior and the compiler/CPU are free to reorder or tear it.
+    // std::atomic<bool> (default seq_cst) fixes visibility/tearing: a reader can't observe
+    // a stale "not active" while a burst is mid-send. It does NOT fix the residual
+    // check-then-act window in SendOcuHeartbeat/SendNmAlive (guard read here, e.g. tx.cpp
+    // ~L243, vs the actual WriteStandard/WriteExtended several lines later, e.g. ~L318) —
+    // the flag can still flip true between the check and the send, letting one heartbeat
+    // slip into a burst, and two bursts from different tasks can still interleave with
+    // each other. Both are pre-existing, out of scope here.
     std::atomic<bool> m_bap_burst_active{false};
 
     // Deferred clima burst. When CommandClimateControl has to wake the bus, it kicks
@@ -202,9 +206,12 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
     // Multi-word handoff written from the command-dispatch task (CommandClimateControl)
     // and read/cleared from Ticker1 — CommandClimateControl also re-reads/re-writes
     // m_clima_pending_enable to retarget a still-pending burst, so this isn't a simple
-    // single-writer case. Each field is std::atomic (seq_cst) rather than hand-tuned
-    // acquire/release: this handoff fires at most once per command, not a hot path, and
-    // seq_cst removes any need to reason about cross-field ordering between the three.
+    // single-writer case. Each field is std::atomic (seq_cst), but seq_cst orders each
+    // atomic individually — it does NOT make the three-field store atomic as a group.
+    // PUBLISH ORDER IS LOAD-BEARING: writers must store m_clima_pending_enable and
+    // m_clima_pending_tick BEFORE m_clima_pending itself (data-then-flag), so a reader
+    // that observes m_clima_pending==true is guaranteed to see the matching enable/tick
+    // rather than a stale/default value. See the ordering in CommandClimateControl.
     std::atomic<bool> m_clima_pending{false};
     std::atomic<bool> m_clima_pending_enable{false};
     std::atomic<uint32_t> m_clima_pending_tick{0};

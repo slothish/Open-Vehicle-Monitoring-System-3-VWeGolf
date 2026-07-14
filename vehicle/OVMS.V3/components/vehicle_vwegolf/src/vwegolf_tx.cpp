@@ -458,9 +458,13 @@ OvmsVehicle::vehicle_command_t OvmsVehicleVWeGolf::CommandClimateControl(bool en
         ESP_LOGI(TAG, "Climate control: KCAN quiet %u s, OEM OCU quiet %u s — waking bus",
                  m_bus_idle_ticks, m_oem_ocu_idle_ticks);
         WakeKcanBus();
-        m_clima_pending = true;
+        // Data-then-flag publish order: store enable/tick BEFORE the pending flag. A
+        // reader (Ticker1) that observes m_clima_pending==true must see the matching
+        // enable/tick, not a stale/default value from before this store — seq_cst
+        // orders each atomic individually but does not reorder these three for you.
         m_clima_pending_enable = enable;
         m_clima_pending_tick = xTaskGetTickCount();
+        m_clima_pending = true;
         return Success;
     }
 
