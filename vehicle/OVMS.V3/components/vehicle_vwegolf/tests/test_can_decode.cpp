@@ -6,12 +6,12 @@
 //
 // Run:  make test   (from the tests/ directory)
 
-#include "mock/mock_ovms.hpp"
-#include "../src/vehicle_vwegolf.h"
-
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+
+#include "../src/vehicle_vwegolf.h"
+#include "mock/mock_ovms.hpp"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,18 +31,21 @@ static CAN_frame_t make_frame(uint32_t id, std::initializer_list<uint8_t> bytes)
     return f;
 }
 
-static bool near(float a, float b, float tol = 0.01f) {
-    return std::fabs(a - b) < tol;
-}
+static bool near(float a, float b, float tol = 0.01f) { return std::fabs(a - b) < tol; }
 
 int tests_run = 0;
 int tests_passed = 0;
 
-#define CHECK(cond, msg) do { \
-    tests_run++; \
-    if (cond) { tests_passed++; printf("  PASS: %s\n", msg); } \
-    else       { printf("  FAIL: %s\n", msg); } \
-} while(0)
+#define CHECK(cond, msg)                 \
+    do {                                 \
+        tests_run++;                     \
+        if (cond) {                      \
+            tests_passed++;              \
+            printf("  PASS: %s\n", msg); \
+        } else {                         \
+            printf("  FAIL: %s\n", msg); \
+        }                                \
+    } while (0)
 
 // ---------------------------------------------------------------------------
 // KCAN (CAN3) tests
@@ -134,7 +137,7 @@ void test_gps_0x486() {
         auto* v = make_vehicle();
         auto f = make_frame(0x486, {0x6d, 0xcc, 0x95, 0x33, 0xac, 0x3d, 0x07, 0xd0});
         v->IncomingFrameCan3(&f);
-        CHECK(near(StandardMetrics.ms_v_pos_latitude->AsFloat(),  60.148845f, 0.000001f),
+        CHECK(near(StandardMetrics.ms_v_pos_latitude->AsFloat(), 60.148845f, 0.000001f),
               "Latitude  60.148845°N from real capture");
         CHECK(near(StandardMetrics.ms_v_pos_longitude->AsFloat(), 15.185286f, 0.000001f),
               "Longitude 15.185286°E from real capture");
@@ -151,9 +154,8 @@ void test_gps_0x486() {
         StandardMetrics.ms_v_pos_longitude->SetValue(15.0f);
         auto f = make_frame(0x486, {0xfe, 0xff, 0xff, 0xf7, 0xff, 0xff, 0xff, 0x3d});
         v->IncomingFrameCan3(&f);
-        CHECK(!StandardMetrics.ms_v_pos_gpslock->AsBool(),
-              "gpslock false for sentinel frame");
-        CHECK(near(StandardMetrics.ms_v_pos_latitude->AsFloat(),  60.0f, 0.001f),
+        CHECK(!StandardMetrics.ms_v_pos_gpslock->AsBool(), "gpslock false for sentinel frame");
+        CHECK(near(StandardMetrics.ms_v_pos_latitude->AsFloat(), 60.0f, 0.001f),
               "Latitude not overwritten by sentinel");
         CHECK(near(StandardMetrics.ms_v_pos_longitude->AsFloat(), 15.0f, 0.001f),
               "Longitude not overwritten by sentinel");
@@ -180,7 +182,7 @@ void test_gps_0x486() {
         // d[7] = 0xd0 | 0x01 = 0xd1 sets the lon sign bit (Western)
         auto f = make_frame(0x486, {0x6d, 0xcc, 0x95, 0x33, 0xac, 0x3d, 0x07, 0xd1});
         v->IncomingFrameCan3(&f);
-        CHECK(near(StandardMetrics.ms_v_pos_latitude->AsFloat(),  60.148845f, 0.000001f),
+        CHECK(near(StandardMetrics.ms_v_pos_latitude->AsFloat(), 60.148845f, 0.000001f),
               "Latitude unchanged (North) when only lon sign set");
         CHECK(near(StandardMetrics.ms_v_pos_longitude->AsFloat(), -15.185286f, 0.000001f),
               "Longitude -15.185286°W (sign bit d[7] bit0)");
@@ -206,7 +208,8 @@ void test_bms_0x191() {
     v->IncomingFrameCan2(&f);
     CHECK(near(StandardMetrics.ms_v_bat_current->AsFloat(), -10.0f), "BMS current -10A (charging)");
     CHECK(near(StandardMetrics.ms_v_bat_voltage->AsFloat(), 400.0f), "BMS voltage 400V");
-    CHECK(near(StandardMetrics.ms_v_bat_power->AsFloat(),    -4.0f), "BMS power -4kW (charging convention)");
+    CHECK(near(StandardMetrics.ms_v_bat_power->AsFloat(), -4.0f),
+          "BMS power -4kW (charging convention)");
 
     delete v;
 
@@ -217,8 +220,10 @@ void test_bms_0x191() {
         StandardMetrics.ms_v_bat_voltage->SetValue(400.0f);
         auto fs = make_frame(0x191, {0x00, 0xE0, 0xFF, 0xFE, 0x0F, 0x00, 0x00, 0x00});
         vs->IncomingFrameCan2(&fs);
-        CHECK(near(StandardMetrics.ms_v_bat_current->AsFloat(),  10.0f), "0x0191 sentinel: current not overwritten");
-        CHECK(near(StandardMetrics.ms_v_bat_voltage->AsFloat(), 400.0f), "0x0191 sentinel: voltage not overwritten");
+        CHECK(near(StandardMetrics.ms_v_bat_current->AsFloat(), 10.0f),
+              "0x0191 sentinel: current not overwritten");
+        CHECK(near(StandardMetrics.ms_v_bat_voltage->AsFloat(), 400.0f),
+              "0x0191 sentinel: voltage not overwritten");
         delete vs;
     }
 }
@@ -255,12 +260,12 @@ void test_locks_0x583() {
         // locked externally (d[2] bit1), all doors closed
         auto f = make_frame(0x583, {0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00});
         v->IncomingFrameCan3(&f);
-        CHECK(StandardMetrics.ms_v_env_locked->AsBool(),   "Locked when d[2] bit1 set");
-        CHECK(!StandardMetrics.ms_v_door_fl->AsBool(),     "FL closed");
-        CHECK(!StandardMetrics.ms_v_door_fr->AsBool(),     "FR closed");
-        CHECK(!StandardMetrics.ms_v_door_rl->AsBool(),     "RL closed");
-        CHECK(!StandardMetrics.ms_v_door_rr->AsBool(),     "RR closed");
-        CHECK(!StandardMetrics.ms_v_door_trunk->AsBool(),  "Trunk closed");
+        CHECK(StandardMetrics.ms_v_env_locked->AsBool(), "Locked when d[2] bit1 set");
+        CHECK(!StandardMetrics.ms_v_door_fl->AsBool(), "FL closed");
+        CHECK(!StandardMetrics.ms_v_door_fr->AsBool(), "FR closed");
+        CHECK(!StandardMetrics.ms_v_door_rl->AsBool(), "RL closed");
+        CHECK(!StandardMetrics.ms_v_door_rr->AsBool(), "RR closed");
+        CHECK(!StandardMetrics.ms_v_door_trunk->AsBool(), "Trunk closed");
         delete v;
     }
 
@@ -270,9 +275,9 @@ void test_locks_0x583() {
         auto f = make_frame(0x583, {0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00});
         v->IncomingFrameCan3(&f);
         CHECK(!StandardMetrics.ms_v_env_locked->AsBool(), "Unlocked when d[2] bit1 clear");
-        CHECK(StandardMetrics.ms_v_door_fl->AsBool(),     "FL open (bit0)");
-        CHECK(!StandardMetrics.ms_v_door_fr->AsBool(),    "FR closed");
-        CHECK(StandardMetrics.ms_v_door_trunk->AsBool(),  "Trunk open (bit4)");
+        CHECK(StandardMetrics.ms_v_door_fl->AsBool(), "FL open (bit0)");
+        CHECK(!StandardMetrics.ms_v_door_fr->AsBool(), "FR closed");
+        CHECK(StandardMetrics.ms_v_door_trunk->AsBool(), "Trunk open (bit4)");
         delete v;
     }
 }
@@ -296,12 +301,13 @@ void test_charge_0x594() {
         v->IncomingFrameCan3(&f);
         CHECK(StandardMetrics.ms_v_charge_duration_full->AsValue() == 120,
               "Charge duration 120 min");
-        CHECK(StandardMetrics.ms_v_charge_timermode->AsBool(),              "Charge timer enabled");
-        CHECK(StandardMetrics.ms_v_charge_inprogress->AsBool(),             "Charging in progress");
-        CHECK(StandardMetrics.ms_v_charge_state->AsValue() == "charging",   "State=charging");
-        CHECK(StandardMetrics.ms_v_charge_type->AsValue() == "type2",       "Type=type2 AC");
-        CHECK(StandardMetrics.ms_v_door_chargeport->AsBool(),               "Charge port open (AC type2)");
-        CHECK(near(StandardMetrics.ms_v_env_cabinsetpoint->AsFloat(), 20.0f), "Cabin setpoint 20°C");
+        CHECK(StandardMetrics.ms_v_charge_timermode->AsBool(), "Charge timer enabled");
+        CHECK(StandardMetrics.ms_v_charge_inprogress->AsBool(), "Charging in progress");
+        CHECK(StandardMetrics.ms_v_charge_state->AsValue() == "charging", "State=charging");
+        CHECK(StandardMetrics.ms_v_charge_type->AsValue() == "type2", "Type=type2 AC");
+        CHECK(StandardMetrics.ms_v_door_chargeport->AsBool(), "Charge port open (AC type2)");
+        CHECK(near(StandardMetrics.ms_v_env_cabinsetpoint->AsFloat(), 20.0f),
+              "Cabin setpoint 20°C");
         delete v;
     }
 
@@ -310,11 +316,12 @@ void test_charge_0x594() {
         // not charging, no cable, timer off, setpoint=15.5°C (raw=0)
         auto f = make_frame(0x594, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
         v->IncomingFrameCan3(&f);
-        CHECK(!StandardMetrics.ms_v_charge_inprogress->AsBool(),           "Not charging");
-        CHECK(StandardMetrics.ms_v_charge_state->AsValue() == "stopped",   "State=stopped");
-        CHECK(!StandardMetrics.ms_v_door_chargeport->AsBool(),             "Charge port closed");
-        CHECK(!StandardMetrics.ms_v_charge_timermode->AsBool(),            "Timer disabled");
-        CHECK(near(StandardMetrics.ms_v_env_cabinsetpoint->AsFloat(), 15.5f), "Cabin setpoint 15.5°C (raw=0)");
+        CHECK(!StandardMetrics.ms_v_charge_inprogress->AsBool(), "Not charging");
+        CHECK(StandardMetrics.ms_v_charge_state->AsValue() == "stopped", "State=stopped");
+        CHECK(!StandardMetrics.ms_v_door_chargeport->AsBool(), "Charge port closed");
+        CHECK(!StandardMetrics.ms_v_charge_timermode->AsBool(), "Timer disabled");
+        CHECK(near(StandardMetrics.ms_v_env_cabinsetpoint->AsFloat(), 15.5f),
+              "Cabin setpoint 15.5°C (raw=0)");
         delete v;
     }
 }
@@ -384,7 +391,8 @@ void test_bat_temp_0x59E() {
         StandardMetrics.ms_v_bat_temp->SetValue(25.0f);
         auto fs = make_frame(0x59E, {0x00, 0x00, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00});
         vs->IncomingFrameCan3(&fs);
-        CHECK(near(StandardMetrics.ms_v_bat_temp->AsFloat(), 25.0f), "0x059E sentinel: bat_temp not overwritten");
+        CHECK(near(StandardMetrics.ms_v_bat_temp->AsFloat(), 25.0f),
+              "0x059E sentinel: bat_temp not overwritten");
         delete vs;
     }
 }
@@ -403,7 +411,8 @@ void test_bat_capacity_0x5CA() {
     StandardMetrics.ms_v_bat_capacity->SetValue(0.0f);
     auto f = make_frame(0x5CA, {0x00, 0xC0, 0x2B, 0x00, 0x00, 0x00, 0x00, 0x00});
     v->IncomingFrameCan3(&f);
-    CHECK(near(StandardMetrics.ms_v_bat_capacity->AsFloat(), 0.0f), "0x05CA log-only: capacity untouched");
+    CHECK(near(StandardMetrics.ms_v_bat_capacity->AsFloat(), 0.0f),
+          "0x05CA log-only: capacity untouched");
 
     delete v;
 }
@@ -415,16 +424,18 @@ void test_bat_capacity_0x5CA() {
 void test_clima_status_0x5EA() {
     printf("\ntest_clima_status_0x5EA\n");
 
-    // NOTE: 0x05EA drives NO metric. remote_mode tracks "clima ECU energized" (ignition/ACC
-    // or a remote session), not cabin conditioning — ms_v_env_hvac is owned by 0x03B5
-    // ClimaRunning. Cabin temp is owned by 0x066E. 0x05EA must leave both untouched.
+    // NOTE: 0x05EA drives NO hvac metric. remote_mode tracks "clima ECU energized"
+    // (ignition/ACC or a remote session), not cabin conditioning — ms_v_env_hvac is owned
+    // by 0x03B5 ClimaRunning. ms_v_env_cabintemp IS owned by 0x05EA (WI-cabintemp-1,
+    // 2026-07-16) — 0x066E d[4] is permanently 0xFE ("not ready") on this car.
     {
         auto* v = make_vehicle();
         StandardMetrics.ms_v_env_hvac->SetValue(true);
         // remote_mode=1 (d3 bit6) — energized, but not "conditioning"; must not change hvac
         auto f = make_frame(0x5EA, {0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x60, 0x09});
         v->IncomingFrameCan3(&f);
-        CHECK(StandardMetrics.ms_v_env_hvac->AsBool(), "0x05EA does not drive hvac (true unchanged)");
+        CHECK(StandardMetrics.ms_v_env_hvac->AsBool(),
+              "0x05EA does not drive hvac (true unchanged)");
         delete v;
     }
 
@@ -433,19 +444,30 @@ void test_clima_status_0x5EA() {
         StandardMetrics.ms_v_env_hvac->SetValue(false);
         auto f = make_frame(0x5EA, {0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x60, 0x09});
         v->IncomingFrameCan3(&f);
-        CHECK(!StandardMetrics.ms_v_env_hvac->AsBool(), "0x05EA does not drive hvac (false unchanged)");
+        CHECK(!StandardMetrics.ms_v_env_hvac->AsBool(),
+              "0x05EA does not drive hvac (false unchanged)");
         delete v;
     }
 
     {
-        // 0x05EA does not own cabin temp: a valid-temperature frame (raw=600 → 20°C, well
-        // below the 1020 sentinel) must leave ms_v_env_cabintemp untouched. 0x066E owns it.
+        // Valid ClimaCabinTemp frame (raw=627 → 22.7°C, below the 1020 sentinel) must set
+        // ms_v_env_cabintemp.
+        auto* v = make_vehicle();
+        auto f = make_frame(0x5EA, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCC, 0x09});
+        v->IncomingFrameCan3(&f);
+        CHECK(near(StandardMetrics.ms_v_env_cabintemp->AsFloat(), 22.7f),
+              "0x05EA ClimaCabinTemp 22.7°C sets ms_v_env_cabintemp");
+        delete v;
+    }
+
+    {
+        // Sentinel (raw >= 1020) must not overwrite the metric.
         auto* v = make_vehicle();
         StandardMetrics.ms_v_env_cabintemp->SetValue(99.0f);
-        auto f = make_frame(0x5EA, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x09});
+        auto f = make_frame(0x5EA, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFC, 0x0F});
         v->IncomingFrameCan3(&f);
         CHECK(near(StandardMetrics.ms_v_env_cabintemp->AsFloat(), 99.0f),
-              "0x05EA does not write cabin temp (0x066E is canonical)");
+              "0x05EA ClimaCabinTemp sentinel (raw>=1020) does not overwrite metric");
         delete v;
     }
 }
@@ -519,7 +541,7 @@ void test_range_0x5F5() {
     // range_ideal=200 km: d[0]=0xC8, d[1]&0x07=0;  200|(0<<8)=200
     auto f = make_frame(0x5F5, {0xC8, 0x00, 0x00, 0x80, 0x16, 0x00, 0x00, 0x00});
     v->IncomingFrameCan3(&f);
-    CHECK(near(StandardMetrics.ms_v_bat_range_est->AsFloat(),   180.0f), "Range est 180 km");
+    CHECK(near(StandardMetrics.ms_v_bat_range_est->AsFloat(), 180.0f), "Range est 180 km");
     CHECK(near(StandardMetrics.ms_v_bat_range_ideal->AsFloat(), 200.0f), "Range ideal 200 km");
 
     delete v;
@@ -552,18 +574,22 @@ void test_hood_0x65A() {
 void test_innentemp_0x66E() {
     printf("\ntest_innentemp_0x66E\n");
 
+    // Log-only since WI-cabintemp-1 (2026-07-16): d[4] is permanently 0xFE on this car,
+    // so this decode never drove the metric in practice. A valid-looking frame must still
+    // NOT set ms_v_env_cabintemp — 0x05EA ClimaCabinTemp is the metric's source now.
     {
         auto* v = make_vehicle();
+        StandardMetrics.ms_v_env_cabintemp->SetValue(99.0f);
         // 20°C: d[4] = (20+50)/0.5 = 140 = 0x8C
         auto f = make_frame(0x66E, {0x00, 0x00, 0x00, 0x00, 0x8C, 0x00, 0x00, 0x00});
         v->IncomingFrameCan3(&f);
-        CHECK(near(StandardMetrics.ms_v_env_cabintemp->AsFloat(), 20.0f),
-              "InnenTemp 20°C from 0x8C");
+        CHECK(near(StandardMetrics.ms_v_env_cabintemp->AsFloat(), 99.0f),
+              "0x066E no longer sets ms_v_env_cabintemp (log-only)");
         delete v;
     }
 
     {
-        // Sentinel 0xFE must not overwrite the metric
+        // Sentinel 0xFE still short-circuits before the log line — no crash.
         auto* v = make_vehicle();
         StandardMetrics.ms_v_env_cabintemp->SetValue(99.0f);
         auto f = make_frame(0x66E, {0x00, 0x00, 0x00, 0x00, 0xFE, 0x00, 0x00, 0x00});
@@ -587,7 +613,7 @@ void test_odo_0x6B7() {
     auto f = make_frame(0x6B7, {0x39, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x82});
     v->IncomingFrameCan3(&f);
     CHECK(near(StandardMetrics.ms_v_pos_odometer->AsFloat(), 12345.0f), "Odometer 12345 km");
-    CHECK(near(StandardMetrics.ms_v_env_temp->AsFloat(),       15.0f),  "Outside temp 15°C");
+    CHECK(near(StandardMetrics.ms_v_env_temp->AsFloat(), 15.0f), "Outside temp 15°C");
 
     delete v;
 }
@@ -601,8 +627,8 @@ void test_ambient_temp_0x6B5() {
 
     {
         // Normal frame: exercise decode path without crash.
-        // solar raw=2000: d[6]=0xD0, d[7]&0x07=0x07 → (0xD0|(0x07<<8))*0.1-40 = 160.0°C (high but valid field)
-        // air raw=300: d[2]=0x2C, d[3]&0x03=0x01 → (0x2C|(0x01<<8))*0.1-40 = -10.4°C
+        // solar raw=2000: d[6]=0xD0, d[7]&0x07=0x07 → (0xD0|(0x07<<8))*0.1-40 = 160.0°C (high but
+        // valid field) air raw=300: d[2]=0x2C, d[3]&0x03=0x01 → (0x2C|(0x01<<8))*0.1-40 = -10.4°C
         auto* v = make_vehicle();
         auto f = make_frame(0x6B5, {0x00, 0x00, 0x2C, 0x01, 0x00, 0x00, 0xD0, 0x07});
         v->IncomingFrameCan3(&f);  // logs only; no metric set yet — just verify no crash
@@ -634,8 +660,7 @@ void test_kcan_resets_idle_counter() {
     auto f = make_frame(0x131, {0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00});
     f.origin = v->m_can3;
     v->IncomingFrameCan3(&f);
-    CHECK(v->test_bus_idle_ticks() == 0,
-          "IncomingFrameCan3 resets idle counter to 0");
+    CHECK(v->test_bus_idle_ticks() == 0, "IncomingFrameCan3 resets idle counter to 0");
     delete v;
 }
 
@@ -654,20 +679,19 @@ void test_fcan_filter_encoding() {
 
     // Replicate mcp_sid lambda: u32 = (SID>>3)<<24 | (SID&7)<<21
     auto mcp_sid = [](uint16_t sid) -> uint32_t {
-        return (static_cast<uint32_t>(sid >> 3) << 24) |
-               (static_cast<uint32_t>(sid & 0x7) << 21);
+        return (static_cast<uint32_t>(sid >> 3) << 24) | (static_cast<uint32_t>(sid & 0x7) << 21);
     };
 
     // Replicate mcp_eid lambda: packs 29-bit extended ID with EXIDE=1
     auto mcp_eid = [](uint32_t ext_id) -> uint32_t {
-        uint32_t sid  = (ext_id >> 18) & 0x7FF;
-        uint32_t eid  =  ext_id & 0x3FFFF;
-        uint8_t  sidh = static_cast<uint8_t>(sid >> 3);
-        uint8_t  sidl = static_cast<uint8_t>(((sid & 0x7) << 5) | (1 << 3) | ((eid >> 16) & 0x3));
-        uint8_t  eid8 = static_cast<uint8_t>( eid >> 8);
-        uint8_t  eid0 = static_cast<uint8_t>( eid);
+        uint32_t sid = (ext_id >> 18) & 0x7FF;
+        uint32_t eid = ext_id & 0x3FFFF;
+        uint8_t sidh = static_cast<uint8_t>(sid >> 3);
+        uint8_t sidl = static_cast<uint8_t>(((sid & 0x7) << 5) | (1 << 3) | ((eid >> 16) & 0x3));
+        uint8_t eid8 = static_cast<uint8_t>(eid >> 8);
+        uint8_t eid0 = static_cast<uint8_t>(eid);
         return (static_cast<uint32_t>(sidh) << 24) | (static_cast<uint32_t>(sidl) << 16) |
-               (static_cast<uint32_t>(eid8) <<  8) |  static_cast<uint32_t>(eid0);
+               (static_cast<uint32_t>(eid8) << 8) | static_cast<uint32_t>(eid0);
     };
 
     // Standard frame: SID=0x131 → SIDH=0x26 SIDL=0x20
@@ -684,16 +708,16 @@ void test_fcan_filter_encoding() {
     CHECK(mcp_eid(0x1A5554A8) == 0xD2A954A8, "mcp_eid(0x1A5554A8) == 0xD2A954A8");
 
     // Round-trip: decode the u32 back to the original extended ID
-    uint32_t u32  = mcp_eid(0x1A5554A8);
+    uint32_t u32 = mcp_eid(0x1A5554A8);
     uint32_t sidh = (u32 >> 24) & 0xFF;
     uint32_t sidl = (u32 >> 16) & 0xFF;
-    uint32_t eid8 = (u32 >>  8) & 0xFF;
-    uint32_t eid0 =  u32        & 0xFF;
+    uint32_t eid8 = (u32 >> 8) & 0xFF;
+    uint32_t eid0 = u32 & 0xFF;
     uint32_t exide = (sidl >> 3) & 0x1;
     uint32_t sid_rt = (sidh << 3) | (sidl >> 5);
     uint32_t eid_rt = ((sidl & 0x3) << 16) | (eid8 << 8) | eid0;
     uint32_t ext_rt = (sid_rt << 18) | eid_rt;
-    CHECK(exide  == 1,           "mcp_eid round-trip: EXIDE=1");
+    CHECK(exide == 1, "mcp_eid round-trip: EXIDE=1");
     CHECK(ext_rt == 0x1A5554A8, "mcp_eid round-trip: decoded ID == 0x1A5554A8");
 }
 

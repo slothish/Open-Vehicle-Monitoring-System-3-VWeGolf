@@ -349,3 +349,28 @@ def test_charging_bit_ccs_window(cap_ccs):
     assert len(ts) == 2, f"expected 2 transitions, got {len(ts)}"
     assert ts[0][0] == pytest.approx(206.6, abs=0.5)
     assert ts[1][0] == pytest.approx(278.6, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# 0x5EA ClimaCabinTemp — PRIMARY ms_v_env_cabintemp source (WI-cabintemp-1,
+# 2026-07-16). candumps/clima-sequence.crtd is a gitignored raw capture
+# (*.crtd ignored under tests/candumps/); regenerate locally if missing.
+# ---------------------------------------------------------------------------
+
+CAP_CLIMA_SEQUENCE = os.path.join(CANDUMPS, "clima-sequence.crtd")
+
+
+@pytest.fixture(scope="module")
+def cap_clima_sequence():
+    return load(CAP_CLIMA_SEQUENCE, bus=3)
+
+
+def test_clima_cabin_temp_tracks_valid_range(cap_clima_sequence, dbc):
+    """0x5EA ClimaCabinTemp decodes to plausible cabin temps throughout
+    clima-sequence.crtd, with the >=1020-raw sentinel filtered out."""
+    vals = cap_clima_sequence.decode(dbc, "5EA", "ClimaCabinTemp")
+    assert vals, "expected 0x5EA frames in clima-sequence.crtd"
+    non_sentinel = [v for _, v in vals if v < 62.0]
+    assert non_sentinel, "expected non-sentinel ClimaCabinTemp readings"
+    assert min(non_sentinel) >= 22.0 and max(non_sentinel) <= 24.0, \
+        f"expected [22.0, 24.0] degC range, got [{min(non_sentinel)}, {max(non_sentinel)}]"

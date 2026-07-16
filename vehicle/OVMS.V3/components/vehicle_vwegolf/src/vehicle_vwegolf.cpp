@@ -118,9 +118,10 @@ OvmsVehicleVWeGolf::OvmsVehicleVWeGolf() {
     SetFcanFilter(MyConfig.GetParamValueBool("xvg", "fcan-filter", true));
 
     // NOTE: no metric writes in the constructor — that defeats metric persistence and is
-    // a maintainer-review blocker. The 0x66E 0xFE "no data yet" sentinel (decodes to 77°C)
-    // is rejected at the decode site (IncomingFrameCan3 case 0x066E) so it never reaches
-    // the metric in the first place; nothing bad gets persisted to clear at boot.
+    // a maintainer-review blocker. ms_v_env_cabintemp's sentinel (0x05EA raw >= 1020, the
+    // ECU's "not available" value) is rejected at the decode site (IncomingFrameCan3 case
+    // 0x05EA) so it never reaches the metric in the first place; nothing bad gets
+    // persisted to clear at boot.
 
     OvmsCommand* cmd_xvg = MyCommandApp.RegisterCommand("xvg", "VW e-Golf controls");
 
@@ -654,19 +655,23 @@ void OvmsVehicleVWeGolf::IncomingFrameCan3(CAN_frame_t* p_frame) {
             break;
         }
         case 0x05EA: {
-            // Clima ECU status broadcast. NOTE: neither field here drives a metric.
+            // Clima ECU status broadcast.
             // remote_mode reflects "clima ECU energized" — true whenever ignition/ACC is on
             // OR a remote session keeps the ECU awake — NOT cabin conditioning. Capture
             // all-168388a82-…-224827 showed it pinned with ignition off and asserted by
             // radio/ACC mode, so ms_v_env_hvac is driven from 0x03B5 ClimaRunning instead.
-            // Cabin temperature is owned by 0x066E (InnenTemp); the reading here uses
-            // different scaling. Both decoded for the log only.
+            // remote_mode stays log-only.
+            //
+            // ClimaCabinTemp (this field) is the PRIMARY ms_v_env_cabintemp source
+            // (WI-cabintemp-1, 2026-07-16): 0x066E d[4] is permanently 0xFE ("not ready")
+            // on this car across all 22 captures on record, so that setter never fires.
             // (Raw ≥ 1020 → ≥ 62°C is the ECU's cabin-temp "not available" sentinel.)
             u16 = ((uint16_t)(d[6] & 0xFC) >> 2) | ((uint16_t)(d[7] & 0x0F) << 6);
             uint8_t remote_mode = ((d[3] & 0xC0) >> 6) | ((d[4] & 0x01) << 2);
             (void)remote_mode;  // log-only; ESP_LOGV compiles out in the native test build
             if (u16 < 1020) {
                 f = u16 * 0.1f - 40.0f;
+                StandardMetrics.ms_v_env_cabintemp->SetValue(f);
                 ESP_LOGV(TAG, "0x05EA clima_cabin=%.1f°C remote_mode=%u", f, remote_mode);
             } else {
                 ESP_LOGV(TAG, "0x05EA clima_cabin=n/a remote_mode=%u", remote_mode);
@@ -727,13 +732,13 @@ void OvmsVehicleVWeGolf::IncomingFrameCan3(CAN_frame_t* p_frame) {
             break;
         }
         case 0x066E: {
-            // InnenTemp: cabin interior temperature sensor.
-            // 0xFE is the ECU's "not ready" sentinel — it decodes to 77°C and must be
-            // discarded to avoid storing a nonsense value in the metric.
+            // InnenTemp: cabin interior temperature sensor. Log-only (WI-cabintemp-1,
+            // 2026-07-16): d[4] is permanently 0xFE ("not ready" sentinel, decodes to 77°C)
+            // on this car — disproven across all 22 captures on record, never observed
+            // non-sentinel. ms_v_env_cabintemp is now driven from 0x05EA ClimaCabinTemp.
             if (d[4] == 0xFE) break;
             f = d[4] * 0.5f - 50.0f;
-            StandardMetrics.ms_v_env_cabintemp->SetValue(f);
-            ESP_LOGV(TAG, "0x066E cabin_temp=%.1f°C", f);
+            ESP_LOGV(TAG, "0x066E cabin_temp=%.1f°C (log-only)", f);
             break;
         }
         case 0x06B0: {
@@ -856,4 +861,3 @@ void OvmsVehicleVWeGolf::Ticker1(uint32_t ticker) {
     ClimaTick(bus_alive);
     CampingTick();
 }
-
