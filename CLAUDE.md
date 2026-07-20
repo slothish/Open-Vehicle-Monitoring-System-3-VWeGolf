@@ -86,8 +86,15 @@ clang-format -i vehicle/OVMS.V3/components/vehicle_vwegolf/src/*.{cpp,h}
 
 Per fix/feat: branch → test → build → OTA flash to-the-module → verify on car → upstream PR. One thing/branch.
 
-- `master` — tracks upstream, no direct commits
-- `vwegolf` — active dev branch
+- `master` — tracks upstream, no direct commits. Keep synced: `git fetch <upstream> master:master`, push to `origin` + `caps`
+- `vwegolf` — active dev branch. All changes land here first, flashed + verified on the car
+- `fix/*` `feat/*` — one PR each, branched **off `master`**, never off `vwegolf`
+
+**Branch model — PR branches come off master, not vwegolf:**
+
+`vwegolf` carries car-verified work but also 140+ commits upstream never sees. A PR branched off it drags all of them in. So per PR: branch fresh off current `master`, then cherry-pick (or rewrite) just that change out of `vwegolf`. Verify with `git diff --stat master...HEAD` — only the intended files, nothing else.
+
+Ignoring this closed + refiled #1459/#1460. Stale PR branches also drift: #1403/#1404 sat on a 15-commit-old master and needed a rebase before merge.
 
 Hooks: `fix/*`/`feat/*` push blocked unless native tests pass. Bypass `--no-verify` emergencies only.
 
