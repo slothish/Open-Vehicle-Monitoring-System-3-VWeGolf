@@ -856,7 +856,15 @@ void OvmsVehicleVWeGolf::Ticker1(uint32_t ticker) {
     // frames (0x03C0/0x0391) stopped before signalling the off transition. Exception to the
     // "decoders own metrics" rule below: asleep really does mean not-awake/not-on, and unlike
     // charge_inprogress this holds during CCS DC too (car charging is not "on"). From PR #1453.
-    if (just_went_idle) {
+    // Guarded on !bus_alive (not just_went_idle's == edge) + still-set idempotency check: the
+    // == edge is unreachable on cold boot (m_bus_idle_ticks inits at VWEGOLF_BUS_TIMEOUT_SECS
+    // and Ticker1 increments before this check, stepping past 10 on tick 1), which left
+    // persistent ms_v_env_awake/ms_v_env_on stale-true after a parked-awake reboot. This form
+    // self-heals cold boot as well as a live bus going idle, and the still-set check keeps it
+    // from re-firing (and re-publishing) every tick once cleared.
+    if (!bus_alive &&
+        (m_kl15_on || m_drivetrain_ready || StandardMetrics.ms_v_env_awake->AsBool() ||
+         StandardMetrics.ms_v_env_on->AsBool())) {
         m_kl15_on = false;
         m_drivetrain_ready = false;
         StandardMetrics.ms_v_env_awake->SetValue(false);

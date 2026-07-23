@@ -370,6 +370,43 @@ void test_ticker1_bus_idle_timeout() {
     delete v;
 }
 
+// Cold-boot regression: ms_v_env_awake/ms_v_env_on are persistent metrics and can be
+// restored true from a prior session with the bus never having gone alive this boot
+// (m_bus_idle_ticks inits at VWEGOLF_BUS_TIMEOUT_SECS). The old `just_went_idle` (== edge)
+// backstop never fires from this state — Ticker1 increments the counter before checking,
+// stepping it past the threshold on tick 1. The fixed !bus_alive backstop must clear the
+// stale-true state on the very first tick.
+void test_ticker1_coldboot_clears_stale_env_state() {
+    printf("\ntest_ticker1_coldboot_clears_stale_env_state\n");
+    g_metrics = MetricStore{};
+    auto* v = new OvmsVehicleVWeGolf();
+
+    // Never touch the bus — simulates a fresh boot where KCAN hasn't been heard from yet.
+    CHECK(v->test_bus_idle_ticks() == VWEGOLF_BUS_TIMEOUT_SECS, "bus starts idle at cold boot");
+
+    // Simulate metrics/state restored true from persistence (NVS) at boot.
+    StandardMetrics.ms_v_env_awake->SetValue(true);
+    StandardMetrics.ms_v_env_on->SetValue(true);
+    v->test_set_kl15_on(true);
+    v->test_set_drivetrain_ready(true);
+
+    call_ticker1(v, 0);
+
+    CHECK(!StandardMetrics.ms_v_env_awake->AsBool(), "ms_v_env_awake cleared on cold-boot tick 1");
+    CHECK(!StandardMetrics.ms_v_env_on->AsBool(), "ms_v_env_on cleared on cold-boot tick 1");
+    CHECK(!v->test_kl15_on(), "m_kl15_on cleared on cold-boot tick 1");
+    CHECK(!v->test_drivetrain_ready(), "m_drivetrain_ready cleared on cold-boot tick 1");
+
+    // Idempotency: once cleared, further idle ticks must not re-write the metrics.
+    int writes_after_clear = g_metrics.write_count("ms_v_env_awake");
+    call_ticker1(v, 1);
+    call_ticker1(v, 2);
+    CHECK(g_metrics.write_count("ms_v_env_awake") == writes_after_clear,
+          "no redundant SetValue churn once state is already clear");
+
+    delete v;
+}
+
 // ---------------------------------------------------------------------------
 // Twilight wake: bus quiet 3+ s, OEM OCU gone — should still wake
 // ---------------------------------------------------------------------------
@@ -881,6 +918,7 @@ void test_clima_all() {
     test_clima_counter_increments();
     test_clima_burst_bytes();
     test_ticker1_bus_idle_timeout();
+    test_ticker1_coldboot_clears_stale_env_state();
     test_hvac_hold_bridges_thermostat_cycle();
     test_hvac_stop_command_responsive();
     test_camping_starts_clima_when_out_of_band();

@@ -246,6 +246,10 @@ class OvmsVehicleVWeGolf : public OvmsVehicle {
     uint8_t test_bus_idle_ticks() const { return m_bus_idle_ticks; }
     bool test_camping_active() const { return m_camping_active; }
     void test_set_bap_burst_active(bool v) { m_bap_burst_active = v; }
+    bool test_kl15_on() const { return m_kl15_on; }
+    void test_set_kl15_on(bool v) { m_kl15_on = v; }
+    bool test_drivetrain_ready() const { return m_drivetrain_ready; }
+    void test_set_drivetrain_ready(bool v) { m_drivetrain_ready = v; }
 #endif
 };
 
