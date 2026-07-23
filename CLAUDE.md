@@ -100,6 +100,19 @@ Hooks: `fix/*`/`feat/*` push blocked unless native tests pass. Bypass `--no-veri
 
 Upstream PRs: small focused per `PROJECT.md` order. Each: pass native tests · ref RE notes in `…/vehicle_vwegolf/docs/` · EN strings · single tag `v-vwegolf` · NO metric defaults in ctor.
 
+**Upstream sweep — run at session start, before opening any PR work.**
+
+Invoke the `upstream-sweep` skill. Read-only, `gh` only, quiet when nothing changed. Covers:
+
+- own open PRs — review decision, mergeable, base drift vs `master`
+- new comments since last sweep (maintainer feedback is the payload, not the count)
+- foreign changes to `vehicle/OVMS.V3/components/vehicle_vwegolf/` by other authors
+- upstream issues matching e-golf / vwegolf / BAP / MQB / mcp2515
+
+State in `.claude/upstream-sweep-state.json` (gitignored); cold start looks back 14 days.
+
+Why: #1453 (`v.e.on`/`v.e.awake`, author SCjona) landed in this component unnoticed. Stale-base drift closed + refiled #1459/#1460 and stalled #1403/#1404. Both classes are cheap to catch and expensive to miss.
+
 ## Maintainer review (dexterbg PR #1327)
 
 Violation = PR returned.
