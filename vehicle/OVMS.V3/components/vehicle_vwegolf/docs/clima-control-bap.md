@@ -76,7 +76,7 @@ Frame 2 (cont):   C0  06 00 20 00
 
 | Off | Value | Field |
 |---|---|---|
-| 0 | `[ah0]` | array header: [ASG-ID:4][**Transaction-ID**:4] — TID echoed in FSG response (our TX code rolls this; thomasakarlsen's trace shows `0x22`) |
+| 0 | `[ah0]` | array header: [ASG-ID:4][**Transaction-ID**:4] — TID echoed in FSG response (our TX code rolls the TID; thomasakarlsen identified this as the array header on PR #1430). **Not a start/stop selector** — an implementation that hardcodes `0x22`=start/`0x23`=stop is reading two consecutive TIDs of one start/stop pair. Proven on-car (`can3-bapprobe-20260723`, E1a/E1b): a START burst carrying `0x23` started clima, a STOP carrying `0x22` stopped it — direction is set by frame 3 alone. Car-native traffic shows ASG-ID 2, TID rolling `0x2a`/`0x2b`/`0x2c`. |
 | 1 | `06` | array header: RecordAddr = 6 (compact record) *(MIB2 FW: "revision tag")* |
 | 2 | `00` | array header: startIndex |
 | 3 | `01` | array header: elementCount = 1 |
@@ -114,7 +114,9 @@ Frame 2 (cont):   C0  06 00 20 00
 
 ### NM Alive Frame (sent from deep sleep — requirement INFERRED, not proven)
 
-The reasoning is that the FSG rejects BAP from nodes outside the OSEK NM ring. **No capture in our corpus demonstrates this** — we have never recorded a bus-asleep BAP command sent *without* the NM frame and observed a rejection, so the requirement is inferred from protocol docs plus the fact that the sequence below works. Treat as unconfirmed; a deliberate negative test would settle it.
+The reasoning is that the FSG rejects BAP from nodes outside the OSEK NM ring. **No capture in our corpus demonstrates this** — we have never recorded a clean bus-asleep BAP command sent *without* the NM frame and observed a rejection, so the requirement is inferred from protocol docs plus the fact that the sequence below works. Treat as unconfirmed.
+
+The 2026-07-23 probe session (`can3-bapprobe-20260723`) looked like a confirmation at the car — a burst with no NM frame was ignored, and rejoining the ring "fixed" it — but the capture does not hold up: the two no-NM failures coincided with a climbing TX-error count (real bus contention), and the failed bursts were also partly scrambled by a wolfSSH paste truncation, so "no ring membership" and "garbled/contended frames" cannot be separated. Still inferred. A clean settle needs a single well-formed burst with no preceding NM alive, sent on a verified-quiet bus (zero `3CER` errors in the surrounding seconds): silent → confirmed; starts → the requirement is false. The probe runbook (`bap-probe-runbook.md`) has the method.
 
 Send before any BAP command when bus was sleeping:
 
@@ -141,11 +143,19 @@ Implemented in `CommandWakeup()`, called by `CommandClimateControl()` when `m_bu
 
 (smartkar additionally documents a `0x5A7` keepalive every 200–500 ms and wake payload `40 00 01 1F`; our sequence above is what's validated on this car.)
 
-### Wake Ping (bus already active)
+### Channel-open ping (bus already active)
 ```
-can send can3 17332501 09 41
+can can3 tx extended 17332501 19 42
+can can3 tx extended 17332501 19 41
 ```
-Sufficient only when KCAN already live (e.g. just after ignition-off). Not for deep sleep.
+The car sends this two-frame channel-open before its own transactions. On-car
+test (Capture `can3-bapprobe-20260723`, run E3a vs a rejoin-only start) shows a
+warm-bus clima start succeeds **with or without** it — not required once the bus
+is up. Necessity from deep sleep is untested.
+
+(An earlier revision of this doc gave the ping as a single `09 41` frame; that
+byte pair appears in **zero** captures across the corpus while `19 41`/`19 42`
+appear throughout — the `09 41` was a transcription slip.)
 
 ## Test Commands (OVMS shell)
 
@@ -171,6 +181,8 @@ Immediate response (~1 s after command):
 ```
 80 0a 49 59  {tid} 04 46 00   [+ continuation]
 ```
-`49 59` = OpCode 0x04 Status, LSG 0x25, Function 0x19 — the SetGet confirmation. `{tid}` = our array-header byte 0 with the FSG's ASG-ID nibble (observed as our value | 0x80), matching command to response via the Transaction-ID.
+`49 59` = OpCode 0x04 Status, LSG 0x25, Function 0x19 — the SetGet confirmation. `{tid}` = our array-header byte 0, matching command to response via the Transaction-ID.
+
+**The `| 0x80` echo is write-ACK-specific, not a general rewrite.** For this SetGet-*write* ACK the FSG returns our byte with the high bit set (`0x07` → `0x87`, 16/16 write bursts across the corpus). A plain *GET* reply on the same function echoes the byte **verbatim** — on-car `0x17332501` GETs with byte 4 = `0x0a` and `0x2a` came back `0x0a` and `0x2a` (Capture `can3-bapprobe-20260723`, runs E2a/E2b). So the high bit is a property of the write-ACK exchange, not an ASG-ID rewrite of an "invalid" nibble — an earlier revision of this doc guessed the latter and it is disproven.
 
 After ACK: FSG sends ~4 keepalive cycles on `17332501` at 5 s intervals (~16 s), then silent until next command.
