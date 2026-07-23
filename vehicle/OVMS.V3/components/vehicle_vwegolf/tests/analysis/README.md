@@ -191,24 +191,27 @@ stays dependency-free (no cantools, no Python needed to run it).
 Deterministic: fixed fictional epoch base, no wall-clock or RNG input —
 re-running produces byte-identical files (`git status` shows no diff).
 
-**Known DBC signal-bit overlaps** (both hit if you try to pack the
-excluded signal alongside the kept one — see the generator's inline
-comments):
-- `Instruments_Range` (0x5F5): `RangeIdeal` (bits 0-10) and `ClimaIdle`
-  (bits 8-15) double-claim bits 8-10. Fixture uses `RangeEst` +
-  `RangeIdeal` only.
-- `ChargeManagement` (0x594): `ChargeType` and `ChargePort` both sit at
-  bits 42-43 (already documented in the DBC `CM_ BO_ 1428` comment).
-  Fixture uses `ChargeType` only.
-
-Both overlaps also break `cantools` `Message.decode()` for the *whole*
-message (not just `Message.encode()`) — `msg.decode(bytes(8))` on
-`Instruments_Range` raises `DecodeError: unpacking failed` even when no
+**Known DBC signal-bit overlap**: `ChargeManagement` (0x594) — `ChargeType`
+and `ChargePort` both sit at bits 42-43 (already documented in the DBC
+`CM_ BO_ 1428` comment). Fixture uses `ChargeType` only; the generator's
+self-test proves `pack_frame()`'s disjointness assert fires if you try to
+pack both. This overlap also breaks `cantools` `Message.decode()` for the
+*whole* message (not just `Message.encode()`) — `msg.decode(bytes(8))` on
+`ChargeManagement` raises `DecodeError: unpacking failed` even when no
 overlapping signal was supplied, because `decode()` always decodes every
-signal defined on the message. `Capture.decode()` swallows this
-silently (see its docstring), so don't rely on it to validate frames for
-these two IDs — the generator's own `pack_frame()` disjointness check is
-the validation path instead.
+signal defined on the message. `Capture.decode()` swallows this silently
+(see its docstring), so don't rely on it to validate 0x594 frames — the
+generator's own `pack_frame()` disjointness check is the validation path
+instead.
+
+`Instruments_Range` (0x5F5) previously had the same failure mode:
+`RangeIdeal` (bits 0-10) and a `ClimaIdle` signal (bits 8-15) double-claimed
+bits 8-10, and `cap.decode()` silently returned `[]` for every 0x5F5 frame.
+Capture-driven investigation disproved `ClimaIdle` (WI-DBC-1, 2026-07-23 —
+see the DBC `CM_ BO_ 1525` comment for the sentinel/invariant evidence);
+`ClimaIdle` was deleted from the DBC, `RangeIdeal` stayed the 11-bit field
+it always was, and 0x5F5 now decodes cleanly via `cap.decode()` like any
+other message.
 
 **Committing a new fixture**: `tests/candumps/.gitignore` blocks
 everything (`*`) because real captures carry VINs/GPS. Any new committed

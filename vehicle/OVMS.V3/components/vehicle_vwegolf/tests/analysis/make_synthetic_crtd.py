@@ -15,13 +15,15 @@ Every frame is packed straight from `docs/vwegolf.dbc` signal metadata
 position, bit length, scale, or offset appears as a literal here. Only
 frame IDs, signal names, physical setpoints, and periods do.
 
-cantools' `Message.encode()` cannot be used on this DBC: RangeIdeal(0|11)
-and ClimaIdle(8|8) double-claim bits 8-10 on 0x5F5, and ChargeType/ChargePort
-double-claim bits 42-43 on 0x594 (the latter already documented in the DBC
-CM_ comment). `pack_frame()` below hand-packs from signal metadata instead,
-and asserts the requested signals' bit masks are disjoint before writing —
-so a DBC overlap defect fails loudly here instead of silently producing a
-corrupt fixture.
+cantools' `Message.encode()` cannot be used for every message on this DBC:
+ChargeType/ChargePort double-claim bits 42-43 on 0x594 (documented in the
+DBC CM_ BO_ 1428 comment). `pack_frame()` below hand-packs from signal
+metadata instead, and asserts the requested signals' bit masks are
+disjoint before writing — so a DBC overlap defect fails loudly here
+instead of silently producing a corrupt fixture. (0x5F5's former
+RangeIdeal bit-8-10 overlap was fixed in WI-DBC-1, 2026-07-23 — the
+other signal there was a disproven ghost, see DBC CM_ BO_ 1525 — so the
+self-test below now exercises the 0x594 alias instead.)
 
 Run (from tests/analysis/, with the project .venv active — needs cantools):
     ../../../../.venv/bin/python make_synthetic_crtd.py
@@ -66,7 +68,7 @@ def pack_frame(dbc, frame_id: int, signal_values: dict) -> bytes:
     Reads start bit, length, scale, and offset from the DBC message's signal
     metadata — the caller supplies only signal names and physical setpoints.
     Asserts the requested signals occupy disjoint bit ranges; a defect like
-    the 0x5F5 RangeIdeal/ClimaIdle overlap raises `OverlapError` instead of
+    the 0x594 ChargeType/ChargePort overlap raises `OverlapError` instead of
     silently producing a corrupt frame.
 
     Only little-endian (Intel, "@1") unsigned signals are supported — every
@@ -109,19 +111,26 @@ def pack_frame(dbc, frame_id: int, signal_values: dict) -> bytes:
 
 
 def _self_test_overlap_detection(dbc) -> None:
-    """Prove the disjointness assert actually fires on the known 0x5F5 overlap.
+    """Prove the disjointness assert actually fires on the known 0x594 alias.
 
-    RangeIdeal (0|11) and ClimaIdle (8|8) double-claim bits 8-10 on
-    Instruments_Range (0x5F5). Supplying both must raise OverlapError.
-    Runs on every invocation so the guarantee never silently rots.
+    ChargeType (42|2) and ChargePort (42|2) share the same bits on
+    ChargeManagement (0x594) — a genuine, still-live same-bits case
+    documented in the DBC CM_ BO_ 1428 comment (out of scope for WI-DBC-1;
+    do not touch it here). Supplying both must raise OverlapError. Runs on
+    every invocation so the guarantee never silently rots.
+
+    (Formerly exercised the 0x5F5 RangeIdeal bit-8-10 overlap — fixed in
+    WI-DBC-1, 2026-07-23: the other signal there was a disproven ghost,
+    see DBC CM_ BO_ 1525. Repointed here since RangeIdeal/RangeEst no
+    longer overlap anything.)
     """
     try:
-        pack_frame(dbc, 0x5F5, {"RangeIdeal": 90, "ClimaIdle": 1})
+        pack_frame(dbc, 0x594, {"ChargeType": 1, "ChargePort": 1})
     except OverlapError as e:
         print(f"[self-test] disjointness assert fired as expected: {e}")
         return
     raise AssertionError(
-        "0x5F5 RangeIdeal/ClimaIdle overlap did NOT raise — "
+        "0x594 ChargeType/ChargePort overlap did NOT raise — "
         "either the DBC overlap was fixed (update this self-test) or the "
         "disjointness check regressed (do not silently drop it)"
     )
@@ -179,9 +188,7 @@ def _build_fixture_b(dbc) -> list[str]:
     # 0x0FD ESP_Speed — plausible, well under the 250 km/h ceiling.
     events += _schedule(0x0FD, {"Speed": 42.5}, count=20, period=0.5, phase=0.05)
 
-    # 0x5F5 Instruments_Range — RangeEst + RangeIdeal ONLY. Do NOT add
-    # ClimaIdle here: it double-claims bits 8-10 with RangeIdeal (see
-    # _self_test_overlap_detection) and pack_frame() will raise.
+    # 0x5F5 Instruments_Range — RangeEst + RangeIdeal, both 11-bit, disjoint.
     events += _schedule(0x5F5, {"RangeEst": 120, "RangeIdeal": 90},
                         count=20, period=0.5, phase=0.20)
 

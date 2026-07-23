@@ -76,7 +76,6 @@ BO_ 1516 ClimaStatus_5EC: 8 ClimaECU
 BO_ 1525 Instruments_Range: 8 Instruments
  SG_ RangeEst : 29|11@1+ (1,0) [0|2047] "km" OVMS
  SG_ RangeIdeal : 0|11@1+ (1,0) [0|2047] "km" OVMS
- SG_ ClimaIdle : 8|8@1+ (1,0) [0|255] "" OVMS
 
 BO_ 1626 BCM_01: 8 BCM
  SG_ HoodOpen : 32|1@1+ (1,0) [0|1] "" OVMS
@@ -301,7 +300,7 @@ CM_ BO_ 1428 "KCAN. HV charge management: duration, timer, plug type, charge sta
 CM_ BO_ 1438 "KCAN. HV battery pack temperature from BMS. Confirmed from captures.";
 CM_ BO_ 1482 "KCAN. HV battery REMAINING energy content (tracks SoC; 5 kWh observed at 18% SoC 2026-07-10). NOT pack capacity — earlier BatCapacity name was wrong. Encoding inferred; values plausible.";
 CM_ BO_ 1514 "KCAN 0x5EA. Clima ECU broadcast status (StandklimaStatus_02). ClimaRemoteMode here = 'ECU energized' (ignition/ACC or remote session), NOT cabin conditioning — do not use for ms_v_env_hvac (it pins/couples to ignition; capture all-168388a82-...-224827). Run-state is 0x3B5 ClimaRunning. ClimaCabinTemp here is the PRIMARY ms_v_env_cabintemp source (WI-cabintemp-1, 2026-07-16): 0x066E InnenTemp d[4] is permanently 0xFE ('not ready') on this car, disproven across all 22 captures on record.";
-CM_ BO_ 1525 "KCAN. Range estimates from instrument cluster. Confirmed from captures. Byte[1] also carries secondary clima idle flag (0x00=active, 0x01=idle). Confirmed Capture 1.";
+CM_ BO_ 1525 "KCAN. Range estimates from instrument cluster. RangeIdeal is an 11-bit field (bits 0-10), not 8 — byte[1] bits 11-15 (the top 5 bits of the would-be ClimaIdle byte) are never set in any of 2959 frames across 33 captures. Sentinel frame `FE 07 F8 DF FF FF C7 FF` puts RangeIdeal AND RangeEst at the 11-bit invalid value 0x7FE simultaneously, byte-identical across 4 captures: 20260524-221008 t=153.7, 20260422-173035 t=0.4 (also kcan-can3-clima_inject t=0.4, kcan-can3-clima_schedule t=116.4). The physical invariant RangeIdeal >= RangeEst holds on all 2933 non-sentinel frames under the 11-bit read; the former 8-bit ClimaIdle read at 8|8 violated it on 69 frames (byte[1]==0x01) by up to 254 km. DISPROVEN: a former SG_ ClimaIdle at 8|8 (0x00=active, 0x01=idle) was a misread of this same carry bit — clima-on cuts ~18-22 km of reserve, dropping RangeIdeal from 264 to 242-246 km, crossing the 256 boundary and clearing bit 8; this correlated with 0x3B5 ClimaRunning transitions in exactly one capture (clima-sequence.crtd) and in none of three others. Use 0x3B5 ClimaRunning (BO_ 949) for clima run-state instead. Bits 53-63 carry an 11-bit mirror of RangeEst (equal in 2939/2939 frames observed) — undecoded, no signal added.";
 CM_ BO_ 1626 "KCAN. BCM_01 bonnet/hood open indicator. Confirmed from captures.";
 CM_ BO_ 1646 "KCAN. Interior cabin temperature sensor (InnenTemp). Log-only (WI-cabintemp-1, 2026-07-16): d[4] is permanently 0xFE ('not ready' sentinel, decodes to 77 degC) on this car — disproven across all 22 captures on record, never observed non-sentinel. ms_v_env_cabintemp now sourced from 0x5EA ClimaCabinTemp. Byte[2] bit 1 also carries primary clima running flag.";
 CM_ BO_ 1712 "KCAN. Windshield/front area temperature sensor. Logged but not yet mapped to a standard metric.";
@@ -348,7 +347,6 @@ CM_ SG_ 2589283496 ChargeTotalizer "Mux B byte 4. Increments +1 per second while
 
 CM_ SG_ 949 ClimaRunning "Bit 7 of byte[0]. 1=cabin actively conditioned (blower running), any trigger. PRIMARY ms_v_env_hvac source (with hold). Confirmed Captures 1, 2, and all-168388a82-...-224827.";
 CM_ SG_ 1516 ClimaStatus "Raw byte at byte[5]. Observed: 0x04=clima idle, 0x07=clima active. Intermediate values not yet decoded.";
-CM_ SG_ 1525 ClimaIdle "Byte[1]. 0x00=clima active, 0x01=clima idle. Secondary indicator, confirmed Capture 1.";
 CM_ SG_ 1646 ClimaRunning "Bit 1 of byte[2]. 0x38=off, 0x3A=on. NOT used — low-rate (~0.45 Hz) and unreliable: in capture all-168388a82-...-224827 it went off at t=43.8 and missed the later blower runs (t=58, 85) that 0x3B5 captured. Use 0x3B5 ClimaRunning (BO_ 949) for run-state. Confirmed Captures 1 and 2 only.";
 CM_ SG_ 1719 ParkTime "17-bit field in d[2][7:4]:d[3]:d[4][4:0]. Encoding not fully confirmed — inferred from firmware bit extraction. Value in seconds (plausible against known parked snapshot).";
 CM_ SG_ 305 SoC "Factor 0.5 %/LSB. Max valid raw = 0xFD (126.5%). Raw 0xFE is ECU startup sentinel — firmware discards it.";
@@ -376,7 +374,6 @@ CM_ SG_ 391 GearPosition "Nibble values: 2=Park 3=Reverse 4=Neutral 5=Drive 6=B-
 
 VAL_ 949 ClimaRunning 0 "Off" 1 "On" ;
 VAL_ 1516 ClimaStatus 4 "Idle" 7 "Active" ;
-VAL_ 1525 ClimaIdle 0 "Active" 1 "Idle" ;
 VAL_ 1646 ClimaRunning 0 "Off" 1 "On" ;
 VAL_ 391 GearPosition 2 "Park" 3 "Reverse" 4 "Neutral" 5 "Drive" 6 "B_mode" ;
 VAL_ 1428 ChargeType 0 "None" 1 "AC_Type2" 2 "DC_CCS" 3 "CableConnected_NotCharging" ;

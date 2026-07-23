@@ -352,6 +352,67 @@ def test_charging_bit_ccs_window(cap_ccs):
 
 
 # ---------------------------------------------------------------------------
+# 0x5F5 Instruments_Range — RangeIdeal is 11 bits (0-10); a former 8-bit
+# signal at bits 8|8 double-claimed bits 8-10 and made cantools raise
+# DecodeError on the whole message (WI-DBC-1, 2026-07-23, disproven and
+# deleted). Ground truth is now recorded in vwegolf.dbc CM_ BO_ 1525
+# (disproof + sentinel + invariant), capture
+# all-168388a82-dirty_ota_0_edge-20260524-221008.md (remote clima session
+# referenced there). Frame counts below are this builder's own corpus
+# scan, not copied from the disproof writeup.
+# ---------------------------------------------------------------------------
+
+CAP_RANGE_SENTINEL = os.path.join(
+    CANDUMPS,
+    "all-168388a82-dirty_ota_0_edge-20260524-221008.crtd")
+
+
+@pytest.fixture(scope="module")
+def cap_range_sentinel():
+    return load(CAP_RANGE_SENTINEL, bus=3)
+
+
+def test_range_decodes_without_error(cap_range_sentinel, dbc):
+    """0x5F5 now decodes via cap.decode() — previously cantools raised
+    DecodeError for the whole message (RangeIdeal's former bit-8-10
+    overlap, see vwegolf.dbc CM_ BO_ 1525) and Capture.decode() swallowed
+    it, returning []. This capture carries 217 0x5F5 frames (verified
+    against this checkout's candump corpus)."""
+    both = cap_range_sentinel.decode(dbc, "5F5")
+    assert len(both) == 217, f"expected 217 0x5F5 frames, got {len(both)}"
+
+
+def test_range_sentinel_is_11_bit_invalid_on_both_signals(cap_range_sentinel, dbc):
+    """Sentinel frame `FE 07 F8 DF FF FF C7 FF` (t~=153.7s here; see
+    vwegolf.dbc CM_ BO_ 1525) puts RangeIdeal AND RangeEst at the 11-bit
+    invalid value 2046 (0x7FE) simultaneously — the disproof of a former
+    8-bit signal at the same bits, which would have left 5 bits of
+    byte[1] permanently dead instead."""
+    both = cap_range_sentinel.decode(dbc, "5F5")
+    sentinels = [(t, v) for t, v in both
+                 if v["RangeIdeal"] == 2046 and v["RangeEst"] == 2046]
+    assert len(sentinels) == 1, f"expected exactly 1 sentinel frame, got {sentinels}"
+    t, v = sentinels[0]
+    assert t == pytest.approx(153.7, abs=0.1)
+
+
+def test_range_ideal_never_below_estimate(cap_range_sentinel, dbc):
+    """Physical invariant: RangeIdeal >= RangeEst on every non-sentinel
+    frame. Held on all 216 non-sentinel frames in this capture (216/217
+    total, 1 sentinel) under the corrected 11-bit RangeIdeal read — the
+    disproven former 8-bit read broke this invariant on byte[1]==0x01
+    frames elsewhere in the corpus (see vwegolf.dbc CM_ BO_ 1525)."""
+    both = cap_range_sentinel.decode(dbc, "5F5")
+    non_sentinel = [(t, v) for t, v in both
+                    if not (v["RangeIdeal"] == 2046 and v["RangeEst"] == 2046)]
+    assert len(non_sentinel) == 216, \
+        f"expected 216 non-sentinel frames, got {len(non_sentinel)}"
+    violations = [(t, v) for t, v in non_sentinel
+                  if v["RangeIdeal"] < v["RangeEst"]]
+    assert violations == [], f"RangeIdeal < RangeEst on: {violations}"
+
+
+# ---------------------------------------------------------------------------
 # 0x5EA ClimaCabinTemp — PRIMARY ms_v_env_cabintemp source (WI-cabintemp-1,
 # 2026-07-16). candumps/clima-sequence.crtd is a gitignored raw capture
 # (*.crtd ignored under tests/candumps/); regenerate locally if missing.
