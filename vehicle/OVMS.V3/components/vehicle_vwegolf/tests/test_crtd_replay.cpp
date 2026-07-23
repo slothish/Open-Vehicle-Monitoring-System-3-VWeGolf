@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 
 // Declared in test_can_decode.cpp
@@ -32,14 +33,35 @@ extern int tests_passed;
 // A pure value check passes when a metric was written once at boot from a
 // persistent store, even if the decoder never ran again. Asserting a write
 // floor against the frame count exposes the gap.
-#define CHECK_WRITES_AT_LEAST(name, n, msg) do { \
+//
+// The floor is `ratio * count(id)`, not a magic constant: `id` is the
+// driving CAN ID named at the call site (so a reader doesn't need to chase
+// a comment to know which frame feeds which metric), and `counts` is the
+// per-message-ID dispatch tally `replay_crtd()` fills in for the fixture
+// actually loaded — so the floor scales with whatever capture is in hand.
+// frames(id)==0 means the driving ID never showed up in the replayed
+// fixture at all — floor = ratio * 0 = 0, so any write count (including 0)
+// would otherwise pass vacuously. That is not "the decoder didn't run", it
+// is "the fixture doesn't exercise this assertion" — fail loudly and name
+// the missing ID so a reader doesn't go chasing the decoder for nothing.
+#define CHECK_WRITES_PROPORTIONAL(name, id, counts, ratio, msg) do { \
     tests_run++; \
     int w = g_metrics.write_count(name); \
-    if (w >= (n)) { \
-        tests_passed++; \
-        printf("  PASS: %s (writes=%d, expected >=%d)\n", msg, w, (n)); \
+    int frames = (counts).count(id) ? (counts).at(id) : 0; \
+    if (frames == 0) { \
+        printf("  FAIL: %s (fixture has ZERO frames of 0x%03X — assertion" \
+               " has nothing to test, not a decoder result)\n", \
+               msg, (unsigned)(id)); \
     } else { \
-        printf("  FAIL: %s (writes=%d, expected >=%d)\n", msg, w, (n)); \
+        int floor = (int)((ratio) * frames); \
+        if (w >= floor) { \
+            tests_passed++; \
+            printf("  PASS: %s (writes=%d, frames(0x%03X)=%d, floor=%d)\n", \
+                   msg, w, (unsigned)(id), frames, floor); \
+        } else { \
+            printf("  FAIL: %s (writes=%d, frames(0x%03X)=%d, floor=%d)\n", \
+                   msg, w, (unsigned)(id), frames, floor); \
+        } \
     } \
 } while(0)
 
@@ -52,7 +74,11 @@ static bool near_f(float a, float b, float tol = 0.1f) {
 // ---------------------------------------------------------------------------
 
 // Returns the number of frames dispatched, or -1 on file-open failure.
-static int replay_crtd(OvmsVehicleVWeGolf* v, const char* path) {
+// `id_counts` is filled in with a per-message-ID dispatch tally, so callers
+// can size write-floor assertions off the actual fixture rather than a
+// constant baked in from one offline capture.
+static int replay_crtd(OvmsVehicleVWeGolf* v, const char* path,
+                        std::map<uint32_t, int>& id_counts) {
     FILE* f = fopen(path, "r");
     if (!f) return -1;
 
@@ -116,6 +142,7 @@ static int replay_crtd(OvmsVehicleVWeGolf* v, const char* path) {
         else if (bus == 3) v->IncomingFrameCan3(&frame);
         else               continue;
         dispatched++;
+        id_counts[msg_id]++;
     }
 
     fclose(f);
@@ -152,8 +179,10 @@ void test_crtd_replay() {
     };
     const char* used_path = nullptr;
     int n = -1;
+    std::map<uint32_t, int> counts;
     for (const char* p : candidates) {
-        n = replay_crtd(v, p);
+        counts.clear();
+        n = replay_crtd(v, p, counts);
         if (n >= 0) { used_path = p; break; }
     }
 
@@ -174,18 +203,22 @@ void test_crtd_replay() {
     CHECK(gear == 0, "Gear = 0 (Park)");
 
     // --- Write floors for FCAN-side decoders. Asserting the metric was
-    //     written at least ~80 % of the frames-in-capture catches the
-    //     "set once at boot, decoder never fires again" class of bug.
-    //     A pure value check passes when a persistent metric is restored
-    //     to its last-known value at boot — the stuck-range_est class.
-    //
-    //     Frame counts in kcan-capture.crtd (via tests/analysis):
-    //       0x131 BMS_SoC      2155 frames (sentinels filtered)
-    //       0x187 GearSelector  456 frames
-    CHECK_WRITES_AT_LEAST("ms_v_bat_soc", 1800,
-                          "SoC decoded ~every 0x131 frame");
-    CHECK_WRITES_AT_LEAST("ms_v_env_gear", 400,
-                          "Gear decoded ~every 0x187 frame");
+    //     written at least a set fraction of the frames-in-capture (per-ID
+    //     count, ratio at each call site below) catches the "set once at
+    //     boot, decoder never fires again" class of bug. A pure value
+    //     check passes when a persistent metric is restored to its
+    //     last-known value at boot — the stuck-range_est class.
+
+    // 0x131 SoC: IncomingFrameCan2 case 0x0131 discards d[3]==0xFE (BMS
+    // "not ready" sentinel). This capture happens to carry none, but the
+    // ratio must hold for any capture, including ones that do — 0.8, not 1.0.
+    CHECK_WRITES_PROPORTIONAL("ms_v_bat_soc", 0x131, counts, 0.8,
+                              "SoC decoded ~every 0x131 frame");
+    // 0x187 gear: the decoder only writes for nibble in {2..6} (P/R/N/D/B);
+    // any other nibble value is silently dropped — same class of gap as a
+    // sentinel filter, so 0.8 rather than assuming every frame decodes.
+    CHECK_WRITES_PROPORTIONAL("ms_v_env_gear", 0x187, counts, 0.8,
+                              "Gear decoded ~every 0x187 frame");
 
     delete v;
 }
@@ -205,14 +238,34 @@ void test_crtd_replay_kcan() {
 
     // 20260428-095821: 23.5 s clean KCAN capture, 182 IDs, every frame
     // tagged bus 3. Spans bus-up, frames flow into IncomingFrameCan3.
-    int n = replay_crtd(v, "candumps/can3-1aec82f33_ota_0_edge-20260428-095821.crtd");
+    //
+    // Candidate order mirrors test_crtd_replay above: an explicit
+    // VWEGOLF_CRTD_KCAN override first, then the developer-local real
+    // capture (gitignored, may be absent on a fresh clone), then the
+    // committed synthetic fixture — generated from docs/vwegolf.dbc — as a
+    // deterministic backstop, so the suite still runs the same way in CI
+    // as it does with the real capture on hand.
+    const char* env_path = getenv("VWEGOLF_CRTD_KCAN");
+    const char* candidates[] = {
+        env_path ? env_path : "candumps/can3-1aec82f33_ota_0_edge-20260428-095821.crtd",
+        "candumps/can3-1aec82f33_ota_0_edge-20260428-095821.crtd",
+        "candumps/can3-synthetic.crtd",
+    };
+    const char* used_path = nullptr;
+    int n = -1;
+    std::map<uint32_t, int> counts;
+    for (const char* p : candidates) {
+        counts.clear();
+        n = replay_crtd(v, p, counts);
+        if (n >= 0) { used_path = p; break; }
+    }
 
     if (n < 0) {
         printf("  SKIP: can3-1aec82f33_ota_0_edge-20260428-095821.crtd not found\n");
         delete v;
         return;
     }
-    printf("  replayed %d frames\n", n);
+    printf("  replayed %d frames from %s\n", n, used_path);
 
     // --- Plausibility on a couple of KCAN-sourced metrics. Range_est is
     //     the specific bug class this test exists to surface ---
@@ -224,27 +277,25 @@ void test_crtd_replay_kcan() {
     CHECK(speed >= 0.0f && speed < 250.0f,
           "speed plausible (0..250 km/h)");
 
-    // --- Write floors for KCAN-side decoders. Frame counts in the
-    //     capture (via tests/analysis):
-    //       0x0FD ESP_Speed         823 frames
-    //       0x131 BMS_SoC          1173 frames (also FCAN, decoded in both)
-    //       0x187 GearSelector      235 frames (also FCAN — same)
-    //       0x5F5 Instruments_Range  24 frames
-    //       0x594 ChargeManagement   47 frames
-    //       0x66E InnenTemp          14 frames (filter 0xFE sentinel ok)
-    //       0x6B7 AmbientTemp        24 frames
-    //       0x65A BCM_01             23 frames
-    //
-    //     Floors are ~80 % of frame count to allow for sentinel filtering.
-    CHECK_WRITES_AT_LEAST("ms_v_pos_speed", 650,
-                          "Speed decoded ~every 0x0FD frame");
-    CHECK_WRITES_AT_LEAST("ms_v_bat_range_est", 20,
-                          "range_est decoded ~every 0x5F5 frame "
-                          "(the stuck-at-boot regression class)");
-    CHECK_WRITES_AT_LEAST("ms_v_door_hood", 20,
-                          "hood door decoded ~every 0x65A frame");
-    CHECK_WRITES_AT_LEAST("ms_v_env_temp", 20,
-                          "outside temp decoded ~every 0x6B7 frame");
+    // --- Write floors for KCAN-side decoders (per-ID count and ratio
+    //     justified at each call site below).
+
+    // 0x0FD speed: IncomingFrameCan3 case 0x00FD writes unconditionally,
+    // no sentinel/range filter — 1.0 holds.
+    CHECK_WRITES_PROPORTIONAL("ms_v_pos_speed", 0x0FD, counts, 1.0,
+                              "Speed decoded ~every 0x0FD frame");
+    // 0x5F5 range_est: case 0x05F5 writes range_est unconditionally every
+    // frame, no filtering — 1.0 holds.
+    CHECK_WRITES_PROPORTIONAL("ms_v_bat_range_est", 0x5F5, counts, 1.0,
+                              "range_est decoded ~every 0x5F5 frame "
+                              "(the stuck-at-boot regression class)");
+    // 0x65A hood: case 0x065A writes unconditionally, no filtering — 1.0 holds.
+    CHECK_WRITES_PROPORTIONAL("ms_v_door_hood", 0x65A, counts, 1.0,
+                              "hood door decoded ~every 0x65A frame");
+    // 0x6B7 outside temp: case 0x06B7 writes odo/parktime/temp unconditionally
+    // every frame, no filtering — 1.0 holds.
+    CHECK_WRITES_PROPORTIONAL("ms_v_env_temp", 0x6B7, counts, 1.0,
+                              "outside temp decoded ~every 0x6B7 frame");
 
     delete v;
 }

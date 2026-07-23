@@ -3,3 +3,5 @@
 *
 !.gitignore
 !*.md
+!kcan-synthetic.crtd
+!can3-synthetic.crtd

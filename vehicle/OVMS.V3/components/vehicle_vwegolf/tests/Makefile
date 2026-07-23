@@ -28,7 +28,15 @@ PYTEST ?= pytest
 pytest:
 	cd analysis && $(PYTEST) -q
 
+# Regenerates the committed synthetic CRTD fixtures (candumps/kcan-synthetic.crtd,
+# candumps/can3-synthetic.crtd) from docs/vwegolf.dbc. Requires the project venv
+# (.venv) with cantools installed — see analysis/README.md. Not a prerequisite of
+# `test`: the C++ gate stays dependency-free (no cantools, no Python).
+PYTHON ?= python
+fixtures:
+	cd analysis && $(PYTHON) make_synthetic_crtd.py
+
 clean:
 	rm -f test
 
-.PHONY: all test pytest clean
+.PHONY: all test pytest fixtures clean
