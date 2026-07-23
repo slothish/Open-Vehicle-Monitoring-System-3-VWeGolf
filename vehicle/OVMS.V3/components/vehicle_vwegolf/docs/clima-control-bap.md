@@ -33,14 +33,19 @@ Names per smartkar BAP_BATTERY_CONTROL.md; "obs." column = what we observed on-c
 | 0x02 | BAP-Config | → FSG | empty SetGet poll seen |
 | 0x10 | PlugState | ← FSG | — |
 | 0x11 | ChargeState | ← FSG | — |
-| 0x12 | ClimateState | ← FSG | 7-byte status ~1 s; payload[0] `05`=active `00`=idle |
+| 0x12 | ClimateState | ← FSG | 7-byte status ~1 s; payload[0] is a multi-valued sub-state, **not** a boolean — `0x11` OVMS-triggered, `0x09` schedule-triggered, `0x05` brief pre-check pulses, `0x00` idle. Not fully decoded. |
 | 0x13 | (status) | ← FSG | `04 04`=active `04 00`=idle |
 | 0x14–0x16 | timer/schedule slots 0–2 | ↔ | 8-byte records; Ack confirms writes |
 | 0x18 | ClimateOperationModeInstallation | → FSG | start/stop trigger, 2-byte payload |
 | 0x19 | ProfilesArray | ↔ | Battery Control Profiles (see below) |
 | 0x1A | PowerProvidersArray | ← FSG | slot Ack / status observed |
 
-**Authoritative stop detection:** Function 0x12 (ClimateState) payload[0] `05`→`00` (works for both OVMS-triggered and schedule-triggered stops). Do NOT rely on `0x5EA` remote_mode — stale in remote mode.
+**Authoritative run/stop detection: `0x03B5` ClimaRunning bit7** — this is what firmware uses to drive `ms_v_env_hvac` (`vehicle_vwegolf.cpp`), and it tracks real conditioning within <0.2 s.
+
+Two earlier readings are **superseded**:
+
+- Function 0x12 payload[0] `05`→`00` was documented here as the authoritative stop signal. Wrong — payload[0] is multi-valued (see table above); `0x05` shows up only on brief pre-check pulses, while real sessions read `0x11` (OVMS-triggered) or `0x09` (schedule-triggered). Sustained sessions were verified against `0x03B5` transitions across 3 independent captures.
+- `0x5EA` remote_mode lags actual stop by 17–30 s (measured: 29.7 s and 16.8 s in two OVMS-triggered sessions) — never use it for stop detection.
 
 ## Battery Control Profiles (Function 0x19)
 
@@ -82,7 +87,9 @@ Frame 2 (cont):   C0  06 00 20 00
 
 **There is no temperature in this message.** The car climatizes to the temperature stored in the global profile (set in infotainment / via a RecordAddr-0 profile write). An earlier revision of this doc misread byte 6 as a temperature (the `(°C−10)×10` encoding was confirmed on the `0x17330110` setpoint *status broadcast*, ports 0x1B/0x21, dash-knob sweep, Captures 2/7 — a real encoding, wrong message). Corrected per MIB2 firmware RE (`SetBatteryControlProfileListRA6`) and smartkar docs, PR #1430 review.
 
-> Firmware note: earlier `SendClimaBapBurst()` encoded the `cc-temp` config into byte 6 (sent as maxCurrent, e.g. 21 °C → 110 A). Fixed to constant `0x20`; the `cc-temp` param and web slider were removed since they had no wire effect. Setting an explicit temperature would need a RecordAddr-0 ProfilesArray write (byte 12, `raw = °C × 10 − 100`) — not yet attempted on-car.
+> Firmware note: earlier `SendClimaBapBurst()` encoded the `cc-temp` config into byte 6 (sent as maxCurrent, e.g. 21 °C → 110 A). Fixed to constant `0x20`; the `cc-temp` param and web slider were removed since they had no wire effect. Confirmed on-car: old firmware really did put `0x96` there for a 25 °C setting, current firmware sends `0x20` — the value tracked our config, not the car's behaviour, which is what makes it our bug rather than a temperature field.
+>
+> Setting an explicit temperature would need a RecordAddr-0 ProfilesArray write (byte 12, `raw = °C × 10 − 100`). **We have never sent one.** Note the asymmetry: RecordAddr-0 *Get requests* (`80 04 19 59 [tid] 00 00 04`) appear in nearly every capture in the corpus, but they are RX — car/OCU-originated. We have never decoded the *content* of a RecordAddr-0 response, so the byte-12 temperature field remains unconfirmed on this car.
 
 ### Frame 3 — trigger (Function 0x18, short message)
 
@@ -105,9 +112,11 @@ Frame 2 (cont):   C0  06 00 20 00
 
 ## KCAN Bus Wake-Up
 
-### NM Alive Frame (CRITICAL — required from deep sleep)
+### NM Alive Frame (sent from deep sleep — requirement INFERRED, not proven)
 
-FSG rejects BAP from nodes not in the OSEK NM ring. Send before any BAP command when bus was sleeping:
+The reasoning is that the FSG rejects BAP from nodes outside the OSEK NM ring. **No capture in our corpus demonstrates this** — we have never recorded a bus-asleep BAP command sent *without* the NM frame and observed a rejection, so the requirement is inferred from protocol docs plus the fact that the sequence below works. Treat as unconfirmed; a deliberate negative test would settle it.
+
+Send before any BAP command when bus was sleeping:
 
 ```
 CAN ID:  0x1B000067  (29-bit extended)

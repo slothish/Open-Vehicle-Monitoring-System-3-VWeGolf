@@ -2,13 +2,13 @@
 # status: pending | partial | done
 id	bus	status	notes
 5	can3	done	cabin temp not broadcast remote (ign-off ECU sleep); v.e.cabintemp stale during remote clima
-6	can3	done	natural stop port 0x12 05->00; v.e.hvac drive from port 0x12 not 0x5EA remote_mode
-7	can3	done	BAP port 0x19 raw=(celsius-10)*10; bug: read cfg in CommandClimateControl not Ticker10 cache
+6	can3	done	natural stop observed; SUPERSEDED: "port 0x12 05->00" and "drive v.e.hvac from port 0x12" both wrong — payload[0] is multi-valued, v.e.hvac drives from 0x03B5 ClimaRunning, see docs/clima-control-bap.md. 0x5EA remote_mode correctly ruled out (lags stop 17-30s). NOTE: source .crtd for this id could not be located 20260723
+7	can3	done	setpoint raw=(celsius-10)*10 on 0x17330110 ports 0x1B/0x21 (dash-knob sweep); DISPROVEN: same encoding in BAP 0x19 profile-write byte 6 — that byte is maxCurrent (const 0x20), see docs/clima-control-bap.md; bug: read cfg in CommandClimateControl not Ticker10 cache
 8	can3	partial	AC/DC charge energy meter — 0x1A5554A8 MuxB b4 = wall-clock seconds (resolved 20260503, +1/s on both AC and DC, NOT energy); DC capture (…-132333) reveals NEW DC-only mux IDs 0x3,0x4,0x7,0x8,0xD,0xE,0xF each with varying b4 — prime candidates for DC current/voltage/power; 0x191 BMS_PowerBus silent during CCS DC (0 frames in 533 s) confirmed; 0x594 ChargeManagement DOES broadcast on KCAN during DC (refutes pre-2026 note) but bit layout differs from AC; AC ground truth: 20260427-173425 (845 s, 1.49 kWh, 6.2 kW), 20260427-200534 (1056 s, 2.17 kWh, 7.4 kW); DC ground truth: 20260503 (1426 s, 13.238 kWh, 33.55 kW, real SoC 49→92%)
 9	can3	pending	lock/unlock auth bytes — fob diff vs 0x5A7 idle (blocks lock PR)
 10	can3	pending	min SoC BAP frame — change in head unit e-Manager, diff vs idle
 11	can1	pending	UDS ign-on retry @ 500k+1M for all ECU addrs (ISO-TP std + VW TP2.0 + 7DF + 200/200)
-12	can3	done	schedule-trig clima: different BAP signaling, same port 0x12 stop detect
+12	can3	done	schedule-trig clima (kcan-can3-clima_schedule.crtd): car-native, ZERO frames on 0x17332501 at trigger — clima ECU fires internally from stored profile, no command sequence on the wire. NOT equivalent to a live VW OCU remote request. Start/stop marked by 0x03B5 ClimaRunning (t=199.6s->284.6s); port 0x12 payload[0]=0x09 sustained, 0x05 only on brief pre-check pulses — SUPERSEDED as stop detect
 13	can3	pending	charge start/stop — min SoC 0%<->100%, diff vs idle
 14	can3	merged→8	folded into cap 8; frame structure confirmed in can3-…-20260413-121648.md
 15	can2	done	gear: 0x187 authoritative; 0x0B3 = drive-armed latch; 0x0B4 b3/4 torque cand (D/B only)

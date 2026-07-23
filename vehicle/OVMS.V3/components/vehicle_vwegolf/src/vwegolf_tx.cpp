@@ -419,9 +419,10 @@ OvmsVehicle::vehicle_command_t OvmsVehicleVWeGolf::SendClimaBapBurst(bool enable
     }
 
     // Stay in the NM ring after both start and stop. On stop the ECU broadcasts a
-    // 0x05→0x00 status transition on BAP port 0x12 a few hundred ms later; dropping
-    // out immediately would miss the ACK. Natural bus-idle timeout in Ticker1 clears
-    // m_ocu_active once KCAN goes quiet.
+    // follow-up frame on BAP port 0x12 a few hundred ms later (payload[0] is a
+    // multi-valued, not-fully-decoded sub-state — not a simple run/stop flag);
+    // dropping out immediately would miss it. Natural bus-idle timeout in Ticker1
+    // clears m_ocu_active once KCAN goes quiet.
     m_ocu_active = true;
     return Success;
 }

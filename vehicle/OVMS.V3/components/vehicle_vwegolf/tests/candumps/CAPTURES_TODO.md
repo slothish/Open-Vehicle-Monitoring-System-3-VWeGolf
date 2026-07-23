@@ -118,15 +118,24 @@ Redo only if BAP on/off frame details are needed that aren't in the clean captur
 ## Cap H — Explicit temp in clima start command (PR #1430 promise)
 
 **Status:** OPEN — promised to maintainer (PR #1430 review, discussion_r3550192463)
-**Goal:** Verify ECU honors an explicit temperature in the port 0x19 command temp byte,
-not just the stored dash setpoint.
+**Premise CHANGED:** the original goal ("does the ECU honor a temp byte in the port 0x19
+compact command") is DISPROVEN, not open. That byte is `maxCurrent` (const 0x20) — see
+`docs/clima-control-bap.md`. The `cc-temp` param and its web slider were removed because
+they had no wire effect. The 20260422 result recorded here as "inconclusive" is in fact
+corroboration: the setpoint broadcast stayed at stored 0x78 while the log claimed 25°C
+was sent — exactly what a non-temperature byte predicts.
 
-**Sequence:** Car parked, dash setpoint at known value (e.g. 22°C = 0x78). Send
-`xvg climate start` with cc-temp set to a DIFFERENT value (e.g. 25°C = 0x96). Log KCAN.
-**Watch:** `0x17330110` port 0x1B/0x21 setpoint broadcast — does it move to 0x96 or
-stay at stored 0x78? Note: verify captures log RX only, own TX absent — judge by the
-broadcast echo, not the command frame. 20260422 caps were inconclusive (stuck at 0x78
-while log claimed temp=25 sent).
+**Goal (restated):** Can an explicit setpoint be commanded at all? The only known path is
+a **RecordAddr-0** (full, 20+ byte) ProfilesArray write on function 0x19, temperature at
+byte 12, `raw = °C x 10 - 100` (22.0°C -> 0x78). Never attempted on-car.
+
+**Sequence:** Car parked, dash setpoint at a known value (e.g. 22°C = 0x78). Send a
+RecordAddr-0 profile write carrying a DIFFERENT temp (e.g. 25°C -> 0xFA), then trigger
+via function 0x18. Log KCAN.
+**Watch:** `0x17330110` port 0x1B/0x21 setpoint broadcast — does it move to the commanded
+value or stay at stored 0x78? Captures log RX only, own TX absent — judge by the
+broadcast echo, not the command frame. Also watch for an FSG NAK on 0x17332510: a
+malformed full-record write is the likely failure mode, and a NAK is itself a result.
 **On result:** update caveat in `clima-control-bap.md` + reply on PR #1430.
 
 ---

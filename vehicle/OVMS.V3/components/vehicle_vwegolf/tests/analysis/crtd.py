@@ -297,9 +297,9 @@ def byte_stats(records: Iterable[tuple[float, list[int]]],
 # ---------------------------------------------------------------------------
 #
 # Used everywhere in `scratch/` for "find timestamps where byte X changed",
-# either to pin a stimulus (`port 0x12 0x05 → 0x00`) or to feed into
-# correlation / diff helpers. mask= and shift= let you isolate a nibble or
-# a single bit without copying the records first.
+# either to pin a stimulus (e.g. `0x3B5 ClimaRunning bit7 flip`) or to feed
+# into correlation / diff helpers. mask= and shift= let you isolate a nibble
+# or a single bit without copying the records first.
 # ---------------------------------------------------------------------------
 
 def transitions(records: Iterable[tuple[float, list[int]]],
