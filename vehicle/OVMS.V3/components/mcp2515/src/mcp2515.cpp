@@ -52,9 +52,23 @@ static IRAM_ATTR void MCP2515_isr(void *pvParameters)
   // as the line stays low, i.e. until AsynchronousInterruptHandler() has drained
   // CANINTF over SPI. Mask this pin's interrupt now, before queuing the service
   // request, so it cannot re-enter while unserviced. Direct register write, not
-  // gpio_intr_disable(): that call is not IRAM-safe and must not be invoked from
-  // an ISR (it may run with the flash cache disabled). Re-arming happens in
-  // AsynchronousInterruptHandler() once CANINTF reads back clear.
+  // gpio_intr_disable(): OVMS installs the GPIO ISR service with
+  // ESP_INTR_FLAG_IRAM (main/ovms_peripherals.cpp), so this handler runs in an
+  // IRAM context and may execute while the flash cache is disabled.
+  // gpio_intr_disable() (components/driver/gpio.c) is not IRAM_ATTR in
+  // ESP-IDF v3.3.4 (only gpio_intr_service is) and must not be called from
+  // here -- the direct single-register write below is also cheaper on this
+  // hot ISR path. Re-arming happens in AsynchronousInterruptHandler() once
+  // CANINTF reads back clear.
+  //
+  // Note: gpio_intr_disable() also does gpio_intr_status_clr() (write-1-to-
+  // clear the GPIO status latch) right after int_ena=0; we deliberately skip
+  // that clear here. It's safe: every re-arm path goes through
+  // gpio_intr_enable(), which itself calls gpio_intr_status_clr() BEFORE
+  // setting int_ena (verified in gpio.c), so any stale latch is cleared
+  // exactly at re-enable -- the only moment it matters. Clearing it here at
+  // mask time would be redundant, and pointless while INT is still held low,
+  // since the level-triggered condition would immediately re-latch it.
   GPIO.pin[me->m_intpin].int_ena = 0;
 
   // we don't know the IRQ source and querying by SPI is too slow for an ISR,
@@ -314,14 +328,6 @@ esp_err_t mcp2515::Start(CAN_mode_t mode, CAN_speed_t speed)
     }
   pcp::SetPowerMode(On);
 
-  // Re-apply acceptance filter if one was configured — Start() resets RXMODE to 3
-  // (receive all), which would bypass the hardware filter on every power cycle.
-  if (m_filter_set)
-    {
-    if (SetAcceptanceFilter(m_filter_cfg) != ESP_OK)
-      ESP_LOGE(TAG, "%s: failed to restore acceptance filter after start", this->GetName());
-    }
-
   return ESP_OK;
   }
 
@@ -430,23 +436,12 @@ esp_err_t mcp2515::SetAcceptanceFilter(const mcp2515_filter_config_t& cfg)
     cfg.mask[0].u8[3], cfg.mask[0].u8[2], cfg.mask[0].u8[1],cfg.mask[0].u8[0],
     cfg.mask[1].u8[3], cfg.mask[1].u8[2], cfg.mask[1].u8[1],cfg.mask[1].u8[0]);
 
-  // Set RXMODE=0 (filter-matched receive) on both RX buffers.
-  // Start() hardcodes RXB0CTRL RXMODE=3 (receive all) for backwards compatibility,
-  // which silently bypasses the acceptance filters.  Switch to filtered mode now that
-  // filters are configured.  BUKT (rollover) bit in RXB0CTRL is preserved via mask.
-  // With mask=0 (all bits don't-care) every frame still matches, so callers that pass
-  // all-zero masks get the same promiscuous behaviour as before.
-  m_spibus->spi_cmd(m_spi, buf, 0, 4, CMD_BITMODIFY, REG_RXB0CTRL, 0b01100000, 0b00000000);
-  m_spibus->spi_cmd(m_spi, buf, 0, 4, CMD_BITMODIFY, REG_RXB1CTRL, 0b01100000, 0b00000000);
-
   // Exit config mode
   if (prev_mode != CANCTRL_MODE_CONFIG && ChangeMode(prev_mode) != ESP_OK)
     {
     return ESP_FAIL;
     }
 
-  m_filter_cfg = cfg;
-  m_filter_set = true;
   return ESP_OK;
   }
 

@@ -1,9 +1,12 @@
 // test_crtd_replay.cpp — Feed a real CRTD capture through the decode pipeline.
 //
-// Reads candumps/kcan-capture.crtd (relative to the tests/ directory), builds
-// CAN_frame_t objects from each data line, and dispatches them to the vehicle
-// module exactly as the OVMS runtime would.  After the replay we check that
-// the metrics contain plausible values derived from the real capture.
+// Replays candumps/kcan-capture.crtd (relative to the tests/ directory) if
+// present — a developer-local real capture, gitignored — falling back to the
+// committed synthetic fixture (candumps/kcan-synthetic.crtd) so the suite is
+// still deterministic in CI without it. Set VWEGOLF_CRTD=<path> to override
+// with a specific capture. Builds CAN_frame_t objects from each data line and
+// dispatches them to the vehicle module exactly as the OVMS runtime would.
+// After the replay we check that the metrics hold the expected values.
 
 #include "mock/mock_ovms.hpp"
 #include "../src/vehicle_vwegolf.h"
@@ -135,14 +138,31 @@ void test_crtd_replay() {
     // exercises only the FCAN-side decoders. KCAN-routed metrics (range,
     // speed, charging, doors, cabin temp) are covered by the second
     // replay below against a properly-tagged bus-3 capture.
-    int n = replay_crtd(v, "candumps/kcan-capture.crtd");
+    //
+    // Candidate order is deliberate: an explicit VWEGOLF_CRTD override first,
+    // then the developer-local real capture above (gitignored, may be absent),
+    // then the committed synthetic fixture as a deterministic backstop — so
+    // the suite still runs the same way in CI as it does with the real capture
+    // on hand.
+    const char* env_path = getenv("VWEGOLF_CRTD");
+    const char* candidates[] = {
+        env_path ? env_path : "candumps/kcan-capture.crtd",
+        "candumps/kcan-capture.crtd",
+        "candumps/kcan-synthetic.crtd",
+    };
+    const char* used_path = nullptr;
+    int n = -1;
+    for (const char* p : candidates) {
+        n = replay_crtd(v, p);
+        if (n >= 0) { used_path = p; break; }
+    }
 
     if (n < 0) {
         printf("  SKIP: candumps/kcan-capture.crtd not found\n");
         delete v;
         return;
     }
-    printf("  replayed %d frames\n", n);
+    printf("  replayed %d frames from %s\n", n, used_path);
 
     // --- SoC: 0x131 d[3]=0x79 → 60.5%. Decoded in IncomingFrameCan2
     //     (line 135 — added in commit fc4de583b alongside the can3 decoder).
