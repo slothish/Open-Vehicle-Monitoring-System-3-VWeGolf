@@ -81,3 +81,5 @@ scripts/
 .claude/
 skills-lock.json
 __pycache__/
+compile_commands.json
+.clangd
