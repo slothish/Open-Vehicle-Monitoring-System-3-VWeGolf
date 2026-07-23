@@ -1,0 +1,125 @@
+# e-manager Infotainment UI Model — BAP decode prior
+#
+# Human-facing projection of the BAP Battery Control data set (LSG 0x25). This is
+# the FIELD DICTIONARY + value domains only — what parameters exist, their ranges,
+# enum/scalar/bitmask nature, grouping. Wire encoding (byte offsets, RecordAddress
+# numbers, scaling) lives in clima-control-bap.md / vw-bap-protocol.md; do NOT
+# restate it here. Use this to constrain/validate decode of captured profile-edit
+# and timer-set frames (e.g. "which byte holds a value in {5,10,13,Max}").
+# Source jpegs: private vwegolf-atlas repo (kept off GitHub). Locale: sv-SE.
+
+meta:
+  lsg: 0x25
+  functions: { profiles: 0x19, timers: [0x14, 0x15, 0x16], trigger: 0x18 }
+  encoding_ref: clima-control-bap.md
+
+entities:
+
+  charging_location:            # Laddningsplats — a named profile (Function 0x19)
+    bap: Battery Control Profile
+    observed_list: ["80% w AC", "100% 32A w AC", "100% 5A w AC", "100% 10A w AC"]
+    fields:
+      - ui: Namn
+        type: string
+        bap_field: RA0 name
+        confidence: high
+      - ui: Klimatreglering
+        type: bool
+        bap_field: operation.bit1 (climate)
+        confidence: high
+      - ui: Laddning
+        type: bool
+        bap_field: operation.bit0 (charge)
+        confidence: high
+      - ui: Batteriets max. laddningsgräns
+        type: percent
+        bap_field: targetChargeLevel (RA6 byte7)
+        confidence: high
+        note: UI confirms percentage, not raw
+      - ui: Max. laddström
+        type: enum
+        domain: [5, 10, 13, Max]
+        unit: A
+        bap_field: maxCurrent (RA6 byte6)
+        confidence: high
+        note: >
+          small enum, not free amps — root cause of #1430 0x96/150A garbage write.
+          "Max" wire value unconfirmed (0x20 seen on-car for a 32A install; whether
+          UI "Max" maps to 0x20 or a sentinel is open).
+      - ui: Nattström
+        type: [bool, time_range]
+        format: HH:MM-HH:MM
+        bap_field: RA0 lead/holding-time (unmapped)
+        confidence: low
+    open:
+      - >
+        charging-locations and departure-timers are SEPARATE UI entities (a timer
+        references a location; >=4 locations can exist). Contradicts firmware model
+        "profile 0 hidden global, 1-3 == timers". Index mapping unsettled — do not
+        assume profile-index == timer-index until a capture settles it.
+
+  departure_timer:              # Ivägkörningstid — timer slots (Functions 0x14-0x16)
+    bap: timer slot record
+    instances_seen: 3
+    fields:
+      - ui: enabled
+        type: bool
+      - ui: time
+        type: time
+        domain: { hour: [0, 23], minute: [0, 59] }
+        bap_field: byte3 hour (0x14-0x16 status record)
+      - ui: Upprepa
+        type: enum
+        domain: [one-shot, weekly]
+      - ui: day_of_week
+        type: bitmask7
+        bits: [Må, Ti, On, To, Fr, Lö, Sö]
+        bap_field: UNKNOWN — not in frame docs
+        confidence: hunt-target
+        note: >
+          highest-value new target. Distinctive: exactly 7 bits, common patterns
+          0x7F all-week / 0x1F weekdays. Turns an ambiguous byte hunt into a mask match.
+      - ui: charge_location_ref
+        type: ref(charging_location)
+
+  global_settings:              # Inställningar köra eldrivet/ladda
+    fields:
+      - ui: Ladda direkt / Max. laddström
+        type: enum
+        domain: [5, 10, 13, Max]
+        unit: A
+        bap_field: maxCurrent on immediate profile 0
+        confidence: high
+      - ui: Kupétemperatur
+        type: temperature
+        unit: C
+        observed: 20.0
+        bap_field: RA0 byte12
+        encoding: raw = C*10 - 100
+        cross_check: 20.0C -> 0x64
+        confidence: >
+          encoding intent confirmed by UI value; RA0 response content still
+          undecoded on this car.
+      - ui: Klimatreglering med batteriström
+        type: bool
+        bap_field: operation.bit2 (climateWithoutExternalSupply)
+        note: 0x06 = climate + climate-on-battery
+        confidence: high
+      - ui: Batteriets min. laddningsgräns
+        type: percent
+        observed: 80
+        bap_field: targetChargeLevel on global profile
+        confidence: high
+
+cross_checks:                   # what this UI model already settles
+  - cabin temp is a real C setpoint (20.0) -> RA0 byte12 = 0x64; confirms encoding intent
+  - maxCurrent is enum {5,10,13,Max}A not free amps -> explains #1430 0x96/150A clobber
+  - both charge-limit sliders are percent -> targetChargeLevel is %
+  - climate/charge per-profile = two operation bits (the plug + thermometer row icons)
+
+open_items:                     # close each with a capture
+  - locate the DoW 7-bit repeat mask in the 0x14-0x16 timer record
+  - Max maxCurrent wire value (0x20 vs sentinel)
+  - Nattström off-peak window encoding (two HH:MM in RA0?)
+  - charging-location vs departure-timer index model
+  - RA0 response content decode (name string + byte12 temp) — never captured

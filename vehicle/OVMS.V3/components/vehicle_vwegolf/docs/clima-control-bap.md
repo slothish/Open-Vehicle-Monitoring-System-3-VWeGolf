@@ -49,7 +49,7 @@ Two earlier readings are **superseded**:
 
 ## Battery Control Profiles (Function 0x19)
 
-Charging/climate settings live in 4 stored **profiles** (= "Charge Locations" in infotainment): profile 0 = hidden global/immediate profile used by "start now" operations; 1–3 = departure timers. Commands do not carry one-shot parameters — they **write profile fields**, then trigger via Function 0x18.
+Charging/climate settings live in 4 stored **profiles** (= "Charge Locations" in infotainment): profile 0 = hidden global/immediate profile used by "start now" operations; 1–3 = departure timers. The infotainment field dictionary + value domains for these profiles (decode prior for captured writes) are in `emanager-ui-model.yml`; note the open charge-location-vs-timer index discrepancy flagged there. Commands do not carry one-shot parameters — they **write profile fields**, then trigger via Function 0x18.
 
 Profiles are BAP arrays; the **RecordAddr** in the array header selects the record format:
 - RecordAddr 0: full profile, 20+ bytes — includes **temperature** at byte 12, encoding `raw = °C × 10 − 100` (22.0 °C → `0x78`), unit byte, lead/holding times, name…
