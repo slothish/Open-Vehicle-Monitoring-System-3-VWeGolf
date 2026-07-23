@@ -766,10 +766,16 @@ void OvmsVehicleVWeGolf::IncomingFrameCan3(CAN_frame_t* p_frame) {
                 (uint32_t)(d[0]) | ((uint32_t)(d[1]) << 8) | ((uint32_t)(d[2] & 0x0F) << 16);
             StandardMetrics.ms_v_pos_odometer->SetValue(odo);
 
-            // Park time: bit-field across d[2:4]. Exact encoding not fully confirmed.
-            u32 = ((uint32_t)(d[2] & 0xF0) << 4) | ((uint32_t)(d[3]) << 4) |
+            // Park time: 17-bit field at bit offset 20, factor 1 s.
+            // d[2] bits [7:4] → result bits [3:0], d[3] → [11:4], d[4] bits [4:0] → [16:12].
+            // The field saturates at its 17-bit max (0x1FFFF ≈ 36.5 h); ignore that clamped
+            // value so v.e.parktime falls back to OVMS's native (uncapped) counter.
+            // (Upstream c51e6aac1 — corrects the low-nibble shift and adds the saturation guard.)
+            u32 = ((uint32_t)(d[2] & 0xF0) >> 4) | ((uint32_t)(d[3]) << 4) |
                   ((uint32_t)(d[4] & 0x1F) << 12);
-            StandardMetrics.ms_v_env_parktime->SetValue(u32);
+            if (u32 != 0x1FFFF) {
+                StandardMetrics.ms_v_env_parktime->SetValue(u32);
+            }
 
             // Outside temperature (filtered): factor 0.5°C, offset -50°C.
             f = d[7] * 0.5f - 50.0f;
