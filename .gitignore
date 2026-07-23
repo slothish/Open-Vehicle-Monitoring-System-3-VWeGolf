@@ -83,3 +83,6 @@ skills-lock.json
 __pycache__/
 compile_commands.json
 .clangd
+
+# ZFS snapshot pseudo-directory at the dataset root (not repo content)
+.zfs/
