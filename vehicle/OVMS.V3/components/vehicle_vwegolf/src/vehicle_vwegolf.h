@@ -95,6 +95,28 @@ typedef struct PageContext PageContext_t;
 #define VWEGOLF_CABINTEMP_SANE_MIN_C (-30)
 #define VWEGOLF_CABINTEMP_SANE_MAX_C 60
 
+// OSEK NM node claim on KCAN. Corpus scan (crtd.py iter_frames, RX only — it drops our
+// own TX frames — over all 41 .crtd files in tests/candumps/, filtered to CAN id
+// 0x1B0000xx) finds 73264 NM frames total, spread across 32 of the 41 files. Node 0x67
+// already occupied by a live ECU: 0x1B000067 appears in 20 of those files, 6369 frames
+// at sustained cadence with payloads that vary within a session (67 10 04 01 01 /
+// 67 10 08 01 01 / 67 00 08 01 01 — byte1=0x00 is never something we emit), while our old
+// fixed payload (67 10 41 84 14 00 00 00) appears zero times in that scan. Genuine
+// duplicate-node collision — 0x67 was never ours to claim.
+// 0x7D is unobserved across all 73264 scanned NM frames — chosen because it is unclaimed
+// IN THE CAPTURES, not because the slot is confirmed free on the vehicle; this is the best
+// available choice from capture evidence, not a verified allocation.
+// Payload byte2/byte3 (0x08/0x01) mirror the exact single-bit PNC-request pattern node
+// 0x46 (Climatronic) puts on the wire: every observed byte2 across the corpus sets exactly
+// one low-nibble bit, optionally |0x40; our old 0x41 and the multi-bit 0x49 alternative
+// never appeared on the wire. byte4 0x14 is observed (126 frames) and carried over
+// unchanged.
+// TODO(v-vwegolf): OSEK-vs-AUTOSAR NM identification is unconfirmed, needs settling
+// against the MQB NM spec.
+#define VWEGOLF_NM_NODE_ID 0x7D
+#define VWEGOLF_NM_CAN_ID 0x1B00007D
+#define VWEGOLF_NM_PAYLOAD {VWEGOLF_NM_NODE_ID, 0x10, 0x08, 0x01, 0x14, 0x00, 0x00, 0x00}
+
 class OvmsVehicleVWeGolf : public OvmsVehicle {
  public:
     OvmsVehicleVWeGolf();

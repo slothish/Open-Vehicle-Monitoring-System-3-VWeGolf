@@ -102,7 +102,7 @@ Capture already logging (`can log status` active) and paste pre-flight passed.
 Then, in the same session:
 ```
 xvg camping status          # must be off — camping trips clima and re-arms the keepalive
-xvg offline                 # stops 0x5A7 AND 0x1B000067 (both gated on m_ocu_active)
+xvg offline                 # stops 0x5A7 AND 0x1B00007D (both gated on m_ocu_active)
 metrics list v.b.soc        # abort if below 40% — the matrix runs the blower repeatedly
 metrics list v.e.hvac
 ```
@@ -148,7 +148,7 @@ and outside BAP (`0x1733xxxx`). No ECU filters for it.
 and wait ~1 s:
 
 ```
-can can3 tx extended 1B000067 67 10 41 84 14 00 00 00
+can can3 tx extended 1B00007D 7D 10 08 01 14 00 00 00
 ```
 
 Observed 2026-07-23: bursts sent without a recent rejoin were ignored (no FSG
@@ -243,7 +243,7 @@ capture that KCAN has gone quiet. Still `xvg offline`.
 E3b, no channel-open:
 ```
 can can3 tx extended 17330301 40 00 01 1F 00 00 00 00
-can can3 tx extended 1B000067 67 10 41 84 14 00 00 00
+can can3 tx extended 1B00007D 7D 10 08 01 14 00 00 00
 can can3 tx extended 17332501 80 04 19 59 0b 00 00 04
 ```
 

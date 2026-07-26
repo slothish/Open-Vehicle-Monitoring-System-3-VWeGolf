@@ -64,10 +64,27 @@ void test_wakeup_sends_nm_alive() {
         // Frame 1: 0x17330301 dominant-bit wake frame
         CHECK(log[0].extended && log[0].id == 0x17330301, "Frame 1 is extended 0x17330301 (wake)");
 
-        // Frame 2: 0x1B000067 NM alive for OVMS node 0x67
-        CHECK(log[1].extended && log[1].id == 0x1B000067,
-              "Frame 2 is extended 0x1B000067 (NM alive)");
-        CHECK(log[1].data[0] == 0x67, "NM alive byte 0 = node ID 0x67");
+        // Frame 2: 0x1B00007D NM alive for OVMS node 0x7D
+        CHECK(log[1].extended && log[1].id == VWEGOLF_NM_CAN_ID,
+              "Frame 2 is extended 0x1B00007D (NM alive)");
+        CHECK(log[1].data[0] == VWEGOLF_NM_NODE_ID, "NM alive byte 0 = node ID 0x7D");
+        uint8_t expected_payload[8] = VWEGOLF_NM_PAYLOAD;
+        bool payload_matches = true;
+        for (int i = 0; i < 8; i++) {
+            if (log[1].data[i] != expected_payload[i]) payload_matches = false;
+        }
+        CHECK(payload_matches, "NM alive payload matches VWEGOLF_NM_PAYLOAD");
+
+        // Literal check, independent of VWEGOLF_NM_* — the macro-based checks above
+        // only prove the code was handed the macro, not what the macro contains.
+        CHECK(log[1].extended && log[1].id == 0x1B00007D,
+              "Frame 2 is literal extended id 0x1B00007D (NM alive)");
+        uint8_t expected_payload_literal[8] = {0x7D, 0x10, 0x08, 0x01, 0x14, 0x00, 0x00, 0x00};
+        bool payload_matches_literal = true;
+        for (int i = 0; i < 8; i++) {
+            if (log[1].data[i] != expected_payload_literal[i]) payload_matches_literal = false;
+        }
+        CHECK(payload_matches_literal, "NM alive payload matches literal 7D 10 08 01 14 00 00 00");
     }
 
     delete v;
@@ -205,13 +222,27 @@ void test_clima_wakes_sleeping_bus() {
     bool has_wake = false;
     bool has_nm = false;
     bool has_bap_immediate = false;
+    // Literal id/payload, independent of VWEGOLF_NM_* — a macro-based comparison
+    // only proves the code was handed the macro, not what the macro contains.
+    // Accumulate with &=, guarded by has_nm, so more than one NM frame in the log
+    // can't let an earlier match get overwritten by a later mismatch (or vice versa).
+    uint8_t expected_nm_payload[8] = {0x7D, 0x10, 0x08, 0x01, 0x14, 0x00, 0x00, 0x00};
+    bool nm_payload_matches = true;
     for (auto& r : log) {
         if (r.extended && r.id == 0x17330301) has_wake = true;
-        if (r.extended && r.id == 0x1B000067) has_nm = true;
+        if (r.extended && r.id == 0x1B00007D) {
+            has_nm = true;
+            bool frame_matches = true;
+            for (int i = 0; i < 8; i++) {
+                if (r.data[i] != expected_nm_payload[i]) frame_matches = false;
+            }
+            nm_payload_matches &= frame_matches;
+        }
         if (r.extended && r.id == 0x17332501) has_bap_immediate = true;
     }
     CHECK(has_wake, "Wake frame 0x17330301 sent");
-    CHECK(has_nm, "NM alive 0x1B000067 sent");
+    CHECK(has_nm, "NM alive 0x1B00007D sent");
+    CHECK(has_nm && nm_payload_matches, "NM alive payload matches literal 7D 10 08 01 14 00 00 00");
     CHECK(!has_bap_immediate, "BAP not sent immediately — deferred to Ticker1");
 
     delete v;
@@ -432,12 +463,27 @@ void test_clima_wakes_in_twilight() {
 
     bool has_wake = false;
     bool has_nm = false;
+    // Literal id/payload, independent of VWEGOLF_NM_* — a macro-based comparison
+    // only proves the code was handed the macro, not what the macro contains.
+    // Accumulate with &=, guarded by has_nm, so more than one NM frame in the log
+    // can't let an earlier match get overwritten by a later mismatch (or vice versa).
+    uint8_t expected_nm_payload[8] = {0x7D, 0x10, 0x08, 0x01, 0x14, 0x00, 0x00, 0x00};
+    bool nm_payload_matches = true;
     for (auto& r : kcan(v)->tx_log) {
         if (r.extended && r.id == 0x17330301) has_wake = true;
-        if (r.extended && r.id == 0x1B000067) has_nm = true;
+        if (r.extended && r.id == 0x1B00007D) {
+            has_nm = true;
+            bool frame_matches = true;
+            for (int i = 0; i < 8; i++) {
+                if (r.data[i] != expected_nm_payload[i]) frame_matches = false;
+            }
+            nm_payload_matches &= frame_matches;
+        }
     }
     CHECK(has_wake, "Wake frame sent in twilight (idle=3, below BUS_TIMEOUT=10)");
     CHECK(has_nm, "NM alive sent in twilight");
+    CHECK(has_nm && nm_payload_matches,
+          "NM alive payload matches literal 7D 10 08 01 14 00 00 00 in twilight");
 
     delete v;
 }

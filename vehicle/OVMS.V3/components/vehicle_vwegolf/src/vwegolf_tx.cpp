@@ -211,15 +211,8 @@ void OvmsVehicleVWeGolf::WakeKcanBus() {
     m_can3->WriteExtended(0x17330301, 8, data, pdMS_TO_TICKS(50));
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    data[0] = 0x67;
-    data[1] = 0x10;
-    data[2] = 0x41;
-    data[3] = 0x84;
-    data[4] = 0x14;
-    data[5] = 0x00;
-    data[6] = 0x00;
-    data[7] = 0x00;
-    m_can3->WriteExtended(0x1B000067, 8, data, pdMS_TO_TICKS(50));
+    uint8_t nm_data[8] = VWEGOLF_NM_PAYLOAD;
+    m_can3->WriteExtended(VWEGOLF_NM_CAN_ID, sizeof(nm_data), nm_data, pdMS_TO_TICKS(50));
     vTaskDelay(pdMS_TO_TICKS(100));
 
     m_ocu_active = true;
@@ -322,14 +315,15 @@ void OvmsVehicleVWeGolf::SendOcuHeartbeat() {
 
 void OvmsVehicleVWeGolf::SendNmAlive() {
     // Ring drops silent nodes after a few cadences; a one-shot alive on wake survives
-    // long enough for warm-bus commands but not a cold BAP burst. OEM 0x67 cadence
-    // ~1.3 s (kcan-can3-clima_schedule.crtd) — Ticker1's 1 Hz tick matches.
+    // long enough for warm-bus commands but not a cold BAP burst. Cadence target ~1.3 s,
+    // taken from the OEM node 0x67's observed NM rate (kcan-can3-clima_schedule.crtd) —
+    // 0x67 is not ours (see VWEGOLF_NM_NODE_ID), but Ticker1's 1 Hz tick still matches it.
     // Burst gate: a 0x1B frame between BAP frames blocks the continuation.
     if (m_bap_burst_active) {
         return;
     }
-    uint8_t data[8] = {0x67, 0x10, 0x41, 0x84, 0x14, 0x00, 0x00, 0x00};
-    m_can3->WriteExtended(0x1B000067, 8, data);
+    uint8_t data[8] = VWEGOLF_NM_PAYLOAD;
+    m_can3->WriteExtended(VWEGOLF_NM_CAN_ID, sizeof(data), data);
 }
 
 OvmsVehicle::vehicle_command_t OvmsVehicleVWeGolf::SendClimaBapBurst(bool enable) {

@@ -105,7 +105,8 @@ BO_ 1719 OdoTempPark: 8 Gateway
 
 // OVMS transmits this frame on KCAN as the OCU application-level presence frame.
 // Must be sent at ~5 Hz while active. Action bits are set for one tick then cleared.
-// Note: this is NOT the OSEK NM alive — see 0x1B000067 below for the NM alive.
+// Note: this is NOT the OSEK NM alive — see 0x1B00007D below for OVMS's NM alive
+// (0x1B000067 is a foreign ECU's node, not ours — see comment there).
 BO_ 1447 OCU_Keepalive: 8 OVMS
  SG_ MirrorFold : 47|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ Horn : 48|1@1+ (1,0) [0|1] "" Vector__XXX
@@ -190,14 +191,34 @@ BO_ 958 PedalStatus_3BE: 8 Vector__XXX
 // Each active KCAN node broadcasts its alive frame at ~1 Hz.
 // Format: byte[0] = node_id (mirrors low byte of CAN ID), byte[1] = NM control
 //   (0x00 = normal, 0x10 = alive with ring participation), bytes[2-7] = node config.
-// OVMS must send 0x1B000067 before issuing BAP commands on a freshly-woken bus.
+// OVMS must send 0x1B00007D before issuing BAP commands on a freshly-woken bus.
 // The clima ECU rejects BAP from nodes not present in the NM ring.
 // ---------------------------------------------------------------------------
 
-// 0x1B000067 (extended) — OVMS OSEK NM alive (node 0x67 = OVMS).
-// Sent by CommandWakeup() before BAP commands when KCAN was sleeping.
-// Data: 67 10 41 84 14 00 00 00  (confirmed from kcan-can3-clima_control.crtd)
-BO_ 2600468583 NM_OVMS_Alive: 8 OVMS
+// 0x1B000067 (extended) — foreign ECU's OSEK NM alive, node 0x67. NOT ours: a
+// corpus scan (crtd.py iter_frames, RX only, over all 41 .crtd files in
+// tests/candumps/, filtered to id 0x1B0000xx) found 73264 NM frames total across
+// 32 of the 41 files; node 0x67 already occupied by a live ECU — 20 of those files
+// carry 0x1B000067, 6369 frames at sustained cadence, payload varying
+// within a session (67 10 04 01 01 / 67 10 08 01 01 / 67 00 08 01 01 — byte1=0x00
+// is never something OVMS emits). The formerly-"confirmed" fixed payload
+// 67 10 41 84 14 00 00 00, previously attributed to OVMS, appears zero times in
+// that scan — sender attribution below corrected accordingly. See VWEGOLF_NM_NODE_ID
+// in vehicle_vwegolf.h.
+BO_ 2600468583 NM_Unknown67_Alive: 8 Vector__XXX
+ SG_ NM_NodeId : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ NM_Control : 8|8@1+ (1,0) [0|255] "" Vector__XXX
+
+// 0x1B00007D (extended) — OVMS OSEK NM alive (node 0x7D = OVMS).
+// Sent by CommandWakeup() and SendNmAlive() on/after a freshly-woken bus, before
+// issuing BAP commands. 0x7D is unobserved across all 73264 scanned NM frames —
+// chosen because it is unclaimed IN THE CAPTURES, not because the slot is confirmed
+// free on the vehicle. Payload 7D 10 08 01 14 00 00 00: byte2/byte3 mirror the
+// single-bit PNC-request pattern node 0x46 (Climatronic) puts on the wire.
+// TODO(v-vwegolf): OSEK-vs-AUTOSAR NM identification is unconfirmed, needs settling
+// against the MQB NM spec.
+// See VWEGOLF_NM_PAYLOAD in vehicle_vwegolf.h.
+BO_ 2600468605 NM_OVMS_Alive: 8 OVMS
  SG_ NM_NodeId : 0|8@1+ (1,0) [0|255] "" Vector__XXX
  SG_ NM_Control : 8|8@1+ (1,0) [0|255] "" Vector__XXX
 
@@ -308,7 +329,8 @@ CM_ BO_ 1717 "KCAN. Dual ambient temperature sensors: outside air and solar. Enc
 CM_ BO_ 1718 "KCAN. Gateway date/time broadcast at 1 Hz. Year = last 2 digits of year (26 = 2026). Day = day-of-month. Hour/Minute/Second = wall-clock time. d[0]=0x4B static across captures — possibly encodes month (both confirmed captures are April); needs capture in a different month to confirm. Confirmed from cap14 (20260413) and cap8 (20260428): day and hour/min/sec match file timestamps.";
 CM_ BO_ 1719 "KCAN. Odometer, park time, and filtered outside temperature. Odometer and outside temp confirmed. Park time encoding not fully confirmed — bit layout inferred from firmware.";
 CM_ BO_ 1447 "KCAN TX by OVMS. OCU OSEK NM keepalive. All-zeros = idle. Action bits are one-shot: set for one transmission then cleared. Lock/unlock bits require additional auth bytes not yet captured.";
-CM_ BO_ 2600468583 "KCAN TX by OVMS (extended 29-bit ID 0x1B000067). OSEK NM alive for OVMS node 0x67. Must be sent before BAP commands on a freshly-woken bus — clima ECU rejects BAP from nodes absent from the NM ring. Confirmed from kcan-can3-clima_control.crtd. Sent by CommandWakeup().";
+CM_ BO_ 2600468583 "KCAN RX, foreign ECU (extended 29-bit ID 0x1B000067). OSEK NM alive for node 0x67 — NOT OVMS. Corpus scan (crtd.py iter_frames, RX only, 41 .crtd files in tests/candumps/, id filter 0x1B0000xx) found 73264 NM frames total across 32 of the 41 files; node 0x67 present in 20 of those files (6369 frames, sustained cadence); payload varies within a session (67 10 04 01 01 / 67 10 08 01 01 / 67 00 08 01 01 — byte1=0x00 never appears in anything OVMS emits). The former 'confirmed' payload 67 10 41 84 14 00 00 00, previously attributed to OVMS, appears zero times in the scan — genuine duplicate-node collision, not our frame. OVMS's own NM alive is 0x1B00007D (BO_ 2600468605).";
+CM_ BO_ 2600468605 "KCAN TX by OVMS (extended 29-bit ID 0x1B00007D). OSEK NM alive for OVMS node 0x7D. Must be sent before BAP commands on a freshly-woken bus — clima ECU rejects BAP from nodes absent from the NM ring. 0x7D chosen as unobserved across the 73264-frame NM corpus scan (not a confirmed-free allocation on the vehicle). Sent by CommandWakeup() and SendNmAlive(). Node 0x67 (BO_ 2600468583) was the prior choice, disproven as a foreign-ECU collision.";
 CM_ BO_ 2600468517 "KCAN RX from clima ECU (extended 29-bit ID 0x1B000025). OSEK NM alive for clima ECU node 0x25. Receiving this frame confirms the clima ECU is alive and joinable after bus wake.";
 CM_ BO_ 2536702721 "KCAN TX by OVMS (extended 29-bit ID 0x17330301). Dominant-bit wake frame sent as first frame in CommandWakeup(). TX_Fail expected when bus sleeping — dominant bits wake transceivers regardless. Response on 0x17330E10 when bus is live. Full BAP decode pending.";
 CM_ BO_ 391 "FCAN. Gear selector position. Confirmed from captures. Corroborated by opendbc vw_mqb.dbc Motor_EV_01: MO_Waehlpos same bit position, identical enum (2=P 3=R 4=N 5=D 6=D/B). opendbc extras checked on drive cap 20260503-143106: MO_Drehzahl_VM (32|16) zero throughout — combustion-engine field, unused on BEV; EV_Rekuperationsstufe (12|3, 1-3 = D-mode reku paddle stages B1-B3) zero throughout all-B-mode drive — candidate, needs a D-mode drive with paddle taps; MO_HVEM_MaxLeistung (55|9 x50 W) reads 0/24000/25400 W — meaning unclear, unvalidated.";

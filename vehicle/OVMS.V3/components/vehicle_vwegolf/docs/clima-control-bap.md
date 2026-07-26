@@ -121,21 +121,24 @@ The 2026-07-23 probe session (`can3-bapprobe-20260723`) looked like a confirmati
 Send before any BAP command when bus was sleeping:
 
 ```
-CAN ID:  0x1B000067  (29-bit extended)
+CAN ID:  0x1B00007D  (29-bit extended)
 DLC:     8
-Data:    67 10 41 84 14 00 00 00
+Data:    7D 10 08 01 14 00 00 00
 ```
 
-- `0x67` = OVMS KCAN NM node ID
+- `0x7D` = OVMS KCAN NM node ID (`0x1B000067`/node `0x67` is a foreign ECU already
+  on the ring, not ours — see `vwegolf.dbc`)
 - Byte 1 = `0x10` = NM alive with ring participation bit
 - Wait ≥ 1 s for ring to settle before sending BAP
 
-Implemented in `CommandWakeup()`, called by `CommandClimateControl()` when `m_bus_idle_ticks >= VWEGOLF_BUS_TIMEOUT_SECS`.
+Implemented in `WakeKcanBus()`, called by `CommandWakeup()`/`CommandClimateControl()`
+when `m_bus_idle_ticks >= VWEGOLF_BUS_TIMEOUT_SECS`, and re-sent periodically by
+`SendNmAlive()`.
 
 ### Full Wake Sequence (bus sleeping)
 
 1. Send `0x17330301` (dominant-bit wake, TX_Fail expected — wakes transceivers)
-2. Send `0x1B000067` NM alive (joins ring)
+2. Send `0x1B00007D` NM alive (joins ring)
 3. Wait 1 s
 4. Send 3-frame clima sequence
 
