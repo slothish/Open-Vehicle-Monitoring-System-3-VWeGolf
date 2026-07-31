@@ -85,14 +85,24 @@ profile.
 
 ### OPEN — our NM payload differs from every real node
 
-```
-real nodes   0e 00 01 01 04 08 04 00
-             a9 00 01 01 04 00 00 00      pattern: <id> 00 01 01 04 ...
-ours         7d 10 08 01 14 00 00 00      pattern: <id> 10 08 01 14 ...
-```
+Full byte-by-byte layout and per-node value distributions are in
+`docs/vwegolf.dbc` (the shared `0x1B0000xx` NM comment block above
+`BO_ 2600468583`) — not restated here, see CLAUDE.md.
 
-All 9 observed real nodes use `00 01 01 04` in bytes 1-4; we use `10 08 01 14`.
-Byte 1 `0x10` is plausibly correct (AUTOSAR NM control bit vector, Active
-Wakeup bit, set by the wake initiator). Bytes 2-4 have no such justification.
-Nothing observably broke. Tracked as WI-NM-4; relates to the unsettled
-OSEK-vs-AUTOSAR question at `src/vehicle_vwegolf.h:114-115`.
+Corrected from an earlier draft of this section: byte 2 `0x08` and byte 4
+`0x14` are NOT unattested values invented for our node. Corpus-wide (all 42
+`.crtd`, RX only, 73510 NM frames, 16 nodes) byte2=0x08 is the SECOND most
+common byte2 value (22234 frames, emitted by 14 real nodes) and byte4=0x14
+is directly attested (126 frames, nodes 0x0E and 0x10). Both were chosen
+deliberately in WI-NM-1 from that full-corpus scan, not picked from this
+one capture. Byte 1 `0x10` is similarly attested: it appears on real node
+`0x67` and nowhere else in the corpus, consistent with an
+Active-Wakeup/initiator-style control bit.
+
+What this 29.3s capture actually shows: real nodes vary byte 2 over time
+(it is a state field — see the DBC comment) while our node holds byte 2/4
+constant across all 30 transmitted frames and never participates in the
+bus-wide state transition real nodes perform after wake. The open question
+is state-machine participation over time, not value legitimacy — the values
+themselves are corpus-attested. Tracked as WI-NM-4; relates to the
+unsettled OSEK-vs-AUTOSAR question at `src/vehicle_vwegolf.h:114-115`.

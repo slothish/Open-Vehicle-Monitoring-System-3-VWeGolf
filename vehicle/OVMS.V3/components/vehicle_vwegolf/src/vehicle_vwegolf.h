@@ -111,8 +111,10 @@ typedef struct PageContext PageContext_t;
 // one low-nibble bit, optionally |0x40; our old 0x41 and the multi-bit 0x49 alternative
 // never appeared on the wire. byte4 0x14 is observed (126 frames) and carried over
 // unchanged.
-// TODO(v-vwegolf): OSEK-vs-AUTOSAR NM identification is unconfirmed, needs settling
-// against the MQB NM spec.
+// can3-3.3.006-364-gaefeffec5_ota_0_edge-20260731-112417.crtd corroborates byte1=0x10
+// as an Active-Wakeup/initiator-style control bit (one capture, not proven). Full
+// payload layout, observed value sets and the still-open OSEK-vs-AUTOSAR NM variant
+// question are documented in docs/vwegolf.dbc, not restated here.
 #define VWEGOLF_NM_NODE_ID 0x7D
 #define VWEGOLF_NM_CAN_ID 0x1B00007D
 #define VWEGOLF_NM_PAYLOAD {VWEGOLF_NM_NODE_ID, 0x10, 0x08, 0x01, 0x14, 0x00, 0x00, 0x00}

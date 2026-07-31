@@ -187,10 +187,48 @@ BO_ 958 PedalStatus_3BE: 8 Vector__XXX
  SG_ ThrottleActive : 40|1@1+ (1,0) [0|1] "" OVMS
 
 // ---------------------------------------------------------------------------
-// OSEK NM frames on KCAN (29-bit extended IDs: 0x1B000000 | node_id)
+// OSEK/AUTOSAR NM frames on KCAN (29-bit extended IDs: 0x1B000000 | node_id)
 // Each active KCAN node broadcasts its alive frame at ~1 Hz.
-// Format: byte[0] = node_id (mirrors low byte of CAN ID), byte[1] = NM control
-//   (0x00 = normal, 0x10 = alive with ring participation), bytes[2-7] = node config.
+//
+// Shared 8-byte payload layout, confirmed across 10 nodes (9 real ECUs plus
+// OVMS: 0x0C, 0x0E, 0x10, 0x14, 0x46, 0x4A, 0x4B, 0x67, 0xA9, 0x7D) in
+// tests/candumps/can3-3.3.006-364-gaefeffec5_ota_0_edge-20260731-112417.crtd
+// (14384 frames, 29.3s of bus traffic, RX unless noted). byte0 matches the
+// low byte of the CAN ID without exception on every one of the 10 nodes.
+//
+//   byte0  node id (== CAN ID & 0xFF).
+//   byte1  control. Real nodes: 0x00 (92% of frames), 0x10 (8%) — and 0x10 is
+//          seen ONLY on node 0x67. CONSISTENT WITH an Active-Wakeup/initiator
+//          bit in an AUTOSAR-style NM control bit vector (0x67 is the node
+//          this firmware previously impersonated, see BO_ 2600468583 below),
+//          but that reading rests on one capture and is not proven against
+//          the MQB NM spec.
+//   byte2  state. Real nodes: 0x01 (74%), 0x02 (25%), 0x04 (1%). Bus-wide
+//          transition observed: nodes 0x0C, 0x14 and 0x0E each flip
+//          0x01 -> 0x02 at the same instant (t=+5.33s in the capture above),
+//          independently of one another. CONSISTENT WITH Repeat-Message ->
+//          Normal-Operation (present in both OSEK NM and AUTOSAR NM) a few
+//          seconds after wake — a hypothesis from one 29s capture, NOT
+//          settled against the spec.
+//   byte3  real nodes: 0x01 (92%) / 0x00 (8%).
+//   byte4  real nodes: 0x04 (89%) / 0x0c (11%) / 0x00 (1%). Node 0x0E visits
+//          byte2=0x04 with byte4=0x00 together — CONSISTENT WITH a
+//          ready-to-sleep state, same one-capture caveat as byte2 above.
+//   byte5  real nodes: 0x00 (98%) / 0x08 (2%).
+//   byte6  real nodes: 0x00 (82%) / 0x04 (9%) / 0x1e (9%).
+//   byte7  0x00 on 100% of real-node frames (invariant).
+//
+// OVMS (node 0x7D, BO_ 2600468605 below) holds byte2=0x08 and byte4=0x14
+// constant across all 30 transmitted frames in the capture and never
+// transitions — outside this one capture's real-node byte2/byte4 sets above,
+// but NOT unattested corpus-wide: a full-corpus scan (all 42 .crtd, RX only,
+// 73510 NM frames, 16 nodes) finds byte2=0x08 as the second most common
+// byte2 value (22234 frames, 14 real nodes) and byte4=0x14 directly attested
+// (126 frames, nodes 0x0E and 0x10) — both were deliberately chosen in
+// WI-NM-1 from that full-corpus scan (see vehicle_vwegolf.h). The open
+// question is state-machine participation over time (byte2 is a state field
+// that real nodes vary and we hold constant), not value legitimacy.
+//
 // OVMS must send 0x1B00007D before issuing BAP commands on a freshly-woken bus.
 // The clima ECU rejects BAP from nodes not present in the NM ring.
 // ---------------------------------------------------------------------------
@@ -215,8 +253,11 @@ BO_ 2600468583 NM_Unknown67_Alive: 8 Vector__XXX
 // chosen because it is unclaimed IN THE CAPTURES, not because the slot is confirmed
 // free on the vehicle. Payload 7D 10 08 01 14 00 00 00: byte2/byte3 mirror the
 // single-bit PNC-request pattern node 0x46 (Climatronic) puts on the wire.
-// TODO(v-vwegolf): OSEK-vs-AUTOSAR NM identification is unconfirmed, needs settling
-// against the MQB NM spec.
+// can3-3.3.006-364-gaefeffec5_ota_0_edge-20260731-112417.crtd corroborates
+// byte1=0x10 as an Active-Wakeup/initiator-style control bit (see the shared
+// payload layout comment above) — one capture, not proven. OSEK-vs-AUTOSAR
+// identification of the NM variant itself remains unsettled against the MQB
+// NM spec.
 // See VWEGOLF_NM_PAYLOAD in vehicle_vwegolf.h.
 BO_ 2600468605 NM_OVMS_Alive: 8 OVMS
  SG_ NM_NodeId : 0|8@1+ (1,0) [0|255] "" Vector__XXX
