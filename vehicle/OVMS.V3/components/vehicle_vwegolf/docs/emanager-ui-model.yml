@@ -98,8 +98,11 @@ entities:
         encoding: raw = C*10 - 100
         cross_check: 20.0C -> 0x64
         confidence: >
-          encoding intent confirmed by UI value; RA0 response content still
-          undecoded on this car.
+          confirmed: RA0 response content decoded across the corpus (74
+          complete four-record responses, id 0x17332510). Byte12 values seen:
+          0x64/0x78/0x96 = 20.0/22.0/25.0C; profiles 1-3 read 0x00 (only
+          profile 0 carries a setpoint). Response array-header shape is in
+          clima-control-bap.md.
       - ui: Klimatreglering med batteriström
         type: bool
         bap_field: operation.bit2 (climateWithoutExternalSupply)
@@ -122,4 +125,5 @@ open_items:                     # close each with a capture
   - Max maxCurrent wire value (0x20 vs sentinel)
   - Nattström off-peak window encoding (two HH:MM in RA0?)
   - charging-location vs departure-timer index model
-  - RA0 response content decode (name string + byte12 temp) — never captured
+  - RA0 response content decode — byte12 temp CONFIRMED (see global_settings
+    Kupetemperatur); name string still undecoded

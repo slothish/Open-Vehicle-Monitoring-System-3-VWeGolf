@@ -59,6 +59,40 @@ operation flags (byte 0): bit0 charge · bit1 climate · bit2 climateWithoutExte
 
 Full field tables: smartkar `BAP_BATTERY_CONTROL.md`.
 
+### RecordAddr-0 Response Decode (Get replies)
+
+RA0 *Get requests* use a 4-byte array header:
+`[TID][RecordAddr][startIndex][elementCount]`. The **response** array header
+is one byte longer — 5 bytes — followed by a profileId byte before the
+record body starts:
+
+| Off | Field |
+|---|---|
+| 0 | Transaction-ID (echoes the request TID) |
+| 1 | `0x04`/`0x05` — response opcode/status |
+| 2 | flags \| RecordAddr |
+| 3 | startIndex |
+| 4 | elementCount |
+| 5 | profileId (0–3) |
+| 6+ | record body — RecordAddr-0 full profile fields, byte 12 = temperature (per above) |
+
+Assuming the response header matches the request's 4-byte shape misaligns
+every record by one byte. Falsified directly on the corpus by record-split
+exact-consumption: 577/577 RA0 responses split cleanly with zero leftover
+bytes at header length 5, 0/577 at header length 4.
+
+Content is confirmed, not just the header shape: 74 complete `plen=130`
+four-record RA0 responses on CAN id `0x17332510` across the corpus. Worked
+example: `tests/candumps/all-168388a82-dirty_ota_0_edge-20260524-221008.crtd`,
+a 19-frame long message (sequence `80 c0..cf c0 c1`) — reassembled-payload
+offset 18 (= header 5 + profileId 1 + record-body offset 12, the "byte 12"
+convention above) reads `0x78` = 22.0 °C.
+
+Observed byte-12 values across profiles: `0x64`/`0x78`/`0x96` =
+20.0/22.0/25.0 °C. Profiles 1–3 read `0x00` at that offset in every capture
+seen — only profile 0 carries a setpoint. That is what the corpus shows, not
+a protocol guarantee: it does not prove profiles 1–3 can never hold one.
+
 ## Climate Start/Stop — 3-Frame Sequence
 
 All on `0x17332501`. Step 1 is a SetGet on ProfilesArray (0x19) writing profile 0 in **compact (RecordAddr 6)** format; step 2 triggers it.
@@ -89,7 +123,7 @@ Frame 2 (cont):   C0  06 00 20 00
 
 > Firmware note: earlier `SendClimaBapBurst()` encoded the `cc-temp` config into byte 6 (sent as maxCurrent, e.g. 21 °C → 110 A). Fixed to constant `0x20`; the `cc-temp` param and web slider were removed since they had no wire effect. Confirmed on-car: old firmware really did put `0x96` there for a 25 °C setting, current firmware sends `0x20` — the value tracked our config, not the car's behaviour, which is what makes it our bug rather than a temperature field.
 >
-> Setting an explicit temperature would need a RecordAddr-0 ProfilesArray write (byte 12, `raw = °C × 10 − 100`). **We have never sent one.** Note the asymmetry: RecordAddr-0 *Get requests* (`80 04 19 59 [tid] 00 00 04`) appear in nearly every capture in the corpus, but they are RX — car/OCU-originated. We have never decoded the *content* of a RecordAddr-0 response, so the byte-12 temperature field remains unconfirmed on this car.
+> Setting an explicit temperature would need a RecordAddr-0 ProfilesArray write (byte 12, `raw = °C × 10 − 100`). **We have never sent one.** Note the asymmetry: RecordAddr-0 *Get requests* (`80 04 19 59 [tid] 00 00 04`) appear in nearly every capture in the corpus, but they are RX — car/OCU-originated. We have decoded the *content* of RecordAddr-0 responses (see "RecordAddr-0 Response Decode" above) — the byte-12 temperature field is confirmed on this car.
 
 ### Frame 3 — trigger (Function 0x18, short message)
 
