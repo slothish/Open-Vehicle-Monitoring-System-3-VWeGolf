@@ -62,9 +62,13 @@ Full field tables: smartkar `BAP_BATTERY_CONTROL.md`.
 ### RecordAddr-0 Response Decode (Get replies)
 
 RA0 *Get requests* use a 4-byte array header:
-`[TID][RecordAddr][startIndex][elementCount]`. The **response** array header
-is one byte longer — 5 bytes — followed by a profileId byte before the
-record body starts:
+`[TID][flags|RecordAddr][startIndex][elementCount]` — every observed request
+(RA0 gets, the RA6 compact write above) carries `0x00`/`0x06` in the
+flags/RecordAddr byte, so whether the high bits are really flags on the
+request side, as they are on the response side below, is unconfirmed; the
+notation is kept parallel to the response header rather than stripped down.
+The **response** array header is one byte longer — 5 bytes — followed by a
+leading record-body byte before the rest of the record:
 
 | Off | Field |
 |---|---|
@@ -73,8 +77,8 @@ record body starts:
 | 2 | flags \| RecordAddr |
 | 3 | startIndex |
 | 4 | elementCount |
-| 5 | profileId (0–3) |
-| 6+ | record body — RecordAddr-0 full profile fields, byte 12 = temperature (per above) |
+| 5 | leading record-body byte, informally called "profileId" below — values observed: `0x00`–`0x04`. Relationship to startIndex is unresolved: a `plen=39` single-record response has `startIndex=3` yet this byte reads `0x04` |
+| 6+ | rest of record body — RecordAddr-0 full profile fields, byte 12 = temperature (per above) |
 
 Assuming the response header matches the request's 4-byte shape misaligns
 every record by one byte. Falsified directly on the corpus by record-split
@@ -85,13 +89,16 @@ Content is confirmed, not just the header shape: 74 complete `plen=130`
 four-record RA0 responses on CAN id `0x17332510` across the corpus. Worked
 example: `tests/candumps/all-168388a82-dirty_ota_0_edge-20260524-221008.crtd`,
 a 19-frame long message (sequence `80 c0..cf c0 c1`) — reassembled-payload
-offset 18 (= header 5 + profileId 1 + record-body offset 12, the "byte 12"
+offset 18 (= header 5 + leading byte 1 + record-body offset 12, the "byte 12"
 convention above) reads `0x78` = 22.0 °C.
 
-Observed byte-12 values across profiles: `0x64`/`0x78`/`0x96` =
-20.0/22.0/25.0 °C. Profiles 1–3 read `0x00` at that offset in every capture
-seen — only profile 0 carries a setpoint. That is what the corpus shows, not
-a protocol guarantee: it does not prove profiles 1–3 can never hold one.
+Observed byte-12 values across the four profiles (by record position in a
+full `plen=130` response — profile 0 = hidden global, 1–3 = departure timers
+per the naming above, not the disputed leading-byte value from the table):
+`0x64`/`0x78`/`0x96` = 20.0/22.0/25.0 °C. Profiles 1–3 read `0x00` at that
+offset in every capture seen — only profile 0 carries a setpoint. That is
+what the corpus shows, not a protocol guarantee: it does not prove profiles
+1–3 can never hold one.
 
 ## Climate Start/Stop — 3-Frame Sequence
 
