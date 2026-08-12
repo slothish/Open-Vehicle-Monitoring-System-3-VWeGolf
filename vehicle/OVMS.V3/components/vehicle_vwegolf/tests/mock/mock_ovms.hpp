@@ -68,16 +68,30 @@ struct canbus {
     std::vector<TxRecord> tx_log;
     CAN_errorstate_t      error_state = CAN_errorstate_none;
 
+    // Test-controlled write failure injection. While > 0, the next WriteStandard/
+    // WriteExtended call returns ESP_FAIL (and does not append to tx_log — a failed
+    // write never hit the bus) and decrements this counter by one. Set to 1 to fail
+    // the next call only, or N to fail the next N. Defaults to 0, so every existing
+    // test keeps today's always-ESP_OK behaviour untouched.
+    int fail_next_writes = 0;
+
     esp_err_t WriteStandard(uint32_t id, uint8_t len, uint8_t* data, int /*wait*/ = 0) {
+        if (ShouldFailWrite()) return ESP_FAIL;
         return LogTx(false, id, len, data);
     }
     esp_err_t WriteExtended(uint32_t id, uint8_t len, uint8_t* data, int /*wait*/ = 0) {
+        if (ShouldFailWrite()) return ESP_FAIL;
         return LogTx(true, id, len, data);
     }
     CAN_errorstate_t GetErrorState() { return error_state; }
     esp_err_t Reset() { return ESP_OK; }
 
  private:
+    bool ShouldFailWrite() {
+        if (fail_next_writes <= 0) return false;
+        fail_next_writes--;
+        return true;
+    }
     esp_err_t LogTx(bool ext, uint32_t id, uint8_t len, uint8_t* data) {
         TxRecord r;
         r.extended = ext;
@@ -396,3 +410,23 @@ struct OvmsVehicle {
     virtual vehicle_command_t CommandClimateControl(bool)     { return NotImplemented; }
     virtual ~OvmsVehicle() { delete m_can1; delete m_can2; delete m_can3; }
 };
+
+// ---------------------------------------------------------------------------
+// Notify — records NotifyString calls in an ordered log so tests can assert
+// count, order, and message contents without the real app's callback/entry
+// pipeline. Signature matches main/ovms_notify.h's OvmsNotify::NotifyString.
+// ---------------------------------------------------------------------------
+struct NotifyRecord {
+    std::string type;
+    std::string subtype;
+    std::string message;
+};
+
+struct OvmsNotify {
+    std::vector<NotifyRecord> log;
+    uint32_t NotifyString(const char* type, const char* subtype, const char* value) {
+        log.push_back({type ? type : "", subtype ? subtype : "", value ? value : ""});
+        return static_cast<uint32_t>(log.size());
+    }
+};
+extern OvmsNotify MyNotify;

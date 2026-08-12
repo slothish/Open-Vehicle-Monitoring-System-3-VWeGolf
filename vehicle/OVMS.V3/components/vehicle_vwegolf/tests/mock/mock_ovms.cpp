@@ -6,3 +6,4 @@ StandardMetricsType StandardMetrics;
 OvmsConfig          MyConfig;
 OvmsCommandApp      MyCommandApp;
 OvmsVehicleFactory  MyVehicleFactory;
+OvmsNotify          MyNotify;
