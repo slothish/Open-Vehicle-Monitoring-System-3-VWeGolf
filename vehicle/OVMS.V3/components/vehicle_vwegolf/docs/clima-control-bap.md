@@ -230,3 +230,137 @@ Immediate response (~1 s after command):
 **The `| 0x80` echo is write-ACK-specific, not a general rewrite.** For this SetGet-*write* ACK the FSG returns our byte with the high bit set (`0x07` → `0x87`, 16/16 write bursts across the corpus). A plain *GET* reply on the same function echoes the byte **verbatim** — on-car `0x17332501` GETs with byte 4 = `0x0a` and `0x2a` came back `0x0a` and `0x2a` (Capture `can3-bapprobe-20260723`, runs E2a/E2b). So the high bit is a property of the write-ACK exchange, not an ASG-ID rewrite of an "invalid" nibble — an earlier revision of this doc guessed the latter and it is disproven.
 
 After ACK: FSG sends ~4 keepalive cycles on `17332501` at 5 s intervals (~16 s), then silent until next command.
+
+## Confirmation-Signal Semantics — Corpus-Wide Scan (WI-CLIMA-CONF-1)
+
+Scanned all 40 real captures currently symlinked into `tests/candumps/`
+(the two committed `*-synthetic.crtd` fixtures excluded — they model DBC
+signal decode, not BAP transaction pairing). Read directly off the raw
+`.crtd` lines — RX, OVMS TX, and `CER TX_Fail` records all included.
+`crtd.py`'s `load()`/`iter_frames()` only recognize `NRxx` record types and
+silently drop our own TX and TX_Fail lines (capture-analysis skill rule 7);
+a BAP confirmation is a TX→RX pair, so any scan built only on `load()`
+would see zero commands and misread the whole channel as one-way. Pinned by
+`tests/analysis/test_bap_confirm.py`.
+
+### (a) `49 58 <flag>` is a transaction confirmation, never a state broadcast
+
+27 `49 58 <flag>` short frames on `0x17332510` across **9** captures
+(`all-168388a82-...-221008`, `all-168388a82-...-224827`,
+`all-3.3.006-269-gab4f52853-...-124542`, `all-dc583be4a-...-132333`,
+`can3-1aec82f33-...-095821`, `can3-bapprobe-20260723`,
+`can3-dff221ec0-...-173035`, `can3-dff221ec0-...-180433`,
+`kcan-can3-clima_control`). Every single one has a preceding own
+`29 58 00 <flag>` (TX or `TX_Fail`) on `0x17332501` within 5.4 s — well
+inside a 25 s correlation window — and zero have no preceding command at
+all. `<flag>` mirrors the command byte (16× `01` start-ack, 11× `00`
+stop-ack). No `49 58` was ever preceded only by a failed transmit — every
+reply traces to an electrically successful send.
+
+This is **one-directional**: every reply we observed is command-correlated,
+but not every command gets a reply back (see "(e)" below) — the corpus has
+5 `29 58` sends that got no `49 58` at all despite transmitting fine.
+
+### (b) Confirm latency bands
+
+Measured from the `29 58 00 <flag>` TX to the matching `49 58 <flag>` RX,
+using `0x3B5` `ClimaRunning` bit7 (see `vwegolf.dbc` `BO_ 949`) sampled
+immediately before the command to classify scenario:
+
+| Scenario | n | Range |
+|---|---|---|
+| start, from off (`ClimaRunning`=0 before cmd) | 13 | 3.935–5.380 s |
+| start, already running (`ClimaRunning`=1 before cmd) | 3 | 0.128–0.214 s |
+| stop | 11 | 0.033–0.094 s |
+
+All 27 replies land in one of these three bands (13+3+11=27); all matched
+commands were electrically-successful TX (`TX_Fail` sends never got a
+reply — consistent with "(a)").
+
+### (c) TID-matched `49 59` latency
+
+Function 0x19 (profile write, long message `80 08 29 59 [tid] 06 00 01` +
+continuation) is a separate transaction from the 0x18 trigger in "(a)"/"(b)".
+Its confirmation is the long message `80 0a 49 59 [tid|0x80] ...`.
+
+29 electrically-successful TX bursts of this shape in the corpus (plus 4
+that never left the transceiver — `TX_Fail`). Of the 29: **23 matched** a
+`49 59` reply with `TID = ours | 0x80` — latency **0.023–2.612 s**. The
+remaining **6 got no matched `49 59` at all**, despite transmitting fine.
+`TX_Fail` bursts never matched (0/4) — a frame that never reached the bus
+cannot be confirmed.
+
+**"Present on every successful burst" does not hold in the strict sense.**
+Two of the 6 unmatched bursts belong to sessions that plainly *did* start:
+`can3-dff221ec0-...-180433` tid `0x01` (t≈+911.7 s) and
+`can3-bapprobe-20260723` tid `0x23` (t≈+1811.9 s) — both have no `49 59`
+for their profile-write burst, yet each is followed by a normal `29 58 00
+01` trigger that *does* get a `49 58 01` ack (5.38 s later for the
+bapprobe case, whose `0x3B5` `ClimaRunning` bit7 also flips to 1 at
++1.95 s, before the transactional ack). So a missing `49 59` does not by
+itself mean the write failed — it only means the FSG chose not to send
+that particular ack this time. The other 4 unmatched bursts (`can3-bapprobe
+-20260723` tid `0x01` ×3 and tid `0x22`, `can3-dff221ec0-...-113543` tid
+`0x05`) sit in sessions where no BAP session resulted at all (see "(e)").
+So: **presence** of a TID-matched `49 59` was never seen on a failed burst
+(23/23 successes in this corpus); **absence** does not reliably distinguish
+success from failure on its own.
+
+Separately, the raw corpus has **24** `49 59` long-message-start replies,
+not 23 — one (`can3-bapprobe-20260723`, tid `0x83`, t≈+1900.3 s) has no
+corresponding OVMS-sent tid-`0x03` burst anywhere in that file. The same
+capture also shows a foreign ASG issuing its own Gets on the shared
+`0x17332501` channel with plain-echoed TIDs (`0x2c`–`0x2e`, no `|0x80`
+rewrite, matching the existing "FSG ACK Pattern" note above) — the stray
+`0x83` reply most likely belongs to that foreign ASG's own SetGet sharing
+the same TID number space, not to us. Not investigated further; noted so a
+future scan doesn't miscount it as ours.
+
+### (d) BAP opcode-7 (Error)
+
+**Zero** opcode-7 (Error) elements — short-message (`byte0 & 0xF0 ==
+0x70`) or long-message-start (`byte0` in `0x80/0x90/0xA0/0xB0`, `byte2 &
+0xF0 == 0x70`) form — on either `0x17332501` or `0x17332510`, anywhere in
+the 40-file corpus. See `vw-bap-protocol.md` "OpCodes"/"Frame Encoding"
+for the bit layout this is derived from.
+
+### (e) BCU-status recency vs. success/failure — correlation, not proof
+
+Gap = time since the last RX frame on `0x17332510` (any function) before a
+`29 58` command TX.
+
+- **Successes** (27, got a `49 58` reply): gap **0.004–1.388 s**.
+- **Failures** split into two distinct modes, conflating them hides real
+  structure:
+  - **TX succeeded, no reply** (5): gap **0.018–67.882 s** — mostly large
+    (4 of 5 are ≥4.5 s) but **one outlier is 0.018 s**
+    (`can3-dff221ec0-...-180433`, t≈+911.7 s — the same event flagged in
+    "(c)" whose accompanying 0x19 burst *did* get confirmed 0.984 s later).
+    So low BCU-status recency does not guarantee a reply.
+  - **`TX_Fail` — never reached the bus** (2, both
+    `kcan-can3-clima_off`): gap **0.153–0.838 s**. This is arbitration
+    failure (dominant-bit collision on a busy bus), not a BCU-silence
+    story — recency doesn't explain it at all, because the frame was never
+    transmitted to be received.
+- Net: recency correlates loosely with the TX-succeeded-no-reply failure
+  mode (successes cap at 1.388 s vs. 4 of 5 such failures ≥4.5 s), but it
+  is not a clean discriminator, and a second, unrelated failure mode
+  (transmit arbitration loss) exists that recency says nothing about.
+
+### (f) NM-release evidence
+
+`all-dc583be4a-dirty_ota_0_edge-20260503-132333.crtd`: our own NM alive TX
+(node `0x67` — this capture predates the WI-NM-1 node fix; `vwegolf.dbc`
+`BO_ 2600468583`/`BO_ 2600468605` comments record that `0x67` was later
+disproven as a foreign ECU's node and OVMS moved to `0x7D`) runs from
++0.04 s to **+8.72 s**
+after the capture's first frame (10 sends), then stops for good. BAP
+traffic (`0x17332501`/`0x17332510`) and the file itself both continue to
+**+533.6 s** (the file is truncated by a module reset ~7 min later per
+this capture's own `.md` notes, so this is a lower bound on the true
+session length, not necessarily its natural end). `0x3B5` `ClimaRunning`
+bit7 flips to 1 at +2.82 s and stays on for the rest of the (truncated)
+file. Meanwhile foreign NM node `0x1B000046` carries the ring throughout
+at a **~200 ms** median frame interval (n=2669, spans the full file) —
+BAP traffic keeps flowing for ~525 s after our own NM participation
+stops, with a foreign node visibly holding the ring the whole time.
