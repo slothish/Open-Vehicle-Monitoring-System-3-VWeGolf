@@ -87,12 +87,20 @@ clang-format -i vehicle/OVMS.V3/components/vehicle_vwegolf/src/*.{cpp,h}
 Per fix/feat: branch → test → build → OTA flash to-the-module → verify on car → upstream PR. One thing/branch.
 
 - `master` — tracks upstream, no direct commits. Keep synced: `git fetch <upstream> master:master`, push to `origin` + `caps`
-- `vwegolf` — active dev branch. All changes land here first, flashed + verified on the car
-- `fix/*` `feat/*` — one PR each, branched **off `master`**, never off `vwegolf`
+- `dev/<yyyy-mm>` — active dev line, cut from `master`. Currently **`dev/2026-08`** (@ `635e21c82`). All changes land here first, flashed + verified on the car
+- `wi/*` — work-item branches, merged into the current dev line
+- `fix/*` `feat/*` — one PR each, branched **off `master`**, never off a dev line
+- `archive/*` — tags, not branches. `archive/dev-<date>` = retired dev lines, `archive/car-<sha>` = builds that ran on the vehicle
 
-**Branch model — PR branches come off master, not vwegolf:**
+**Dev lines are generational — they are re-derived, not maintained forever.**
 
-`vwegolf` carries car-verified work but also 140+ commits upstream never sees. A PR branched off it drags all of them in. So per PR: branch fresh off current `master`, then cherry-pick (or rewrite) just that change out of `vwegolf`. Verify with `git diff --stat master...HEAD` — only the intended files, nothing else.
+`vwegolf` was the previous dev line. Retired 2026-08-15 at 170 commits ahead of master, archived as tag `archive/vwegolf-20260815`; the build then on the car is tag `archive/car-aefeffec5`. When a dev line accumulates enough divergence to make upstream PRs expensive, cut a fresh one from `master`, re-derive deliberately, and archive the old as a tag. Do not delete a retired branch until its successor is car-verified — it is the rollback source.
+
+**Branch model — PR branches come off master, not the dev line:**
+
+A dev line carries car-verified work plus many commits upstream never sees. A PR branched off it drags all of them in. So per PR: branch fresh off current `master`, then cherry-pick (or rewrite) just that change out of the dev line. Verify with `git diff --stat master...HEAD` — only the intended files, nothing else.
+
+Cherry-pick only works when `master` HAS the touched code — grep the symbols against master first, else re-derive from scratch.
 
 Ignoring this closed + refiled #1459/#1460. Stale PR branches also drift: #1403/#1404 sat on a 15-commit-old master and needed a rebase before merge.
 
